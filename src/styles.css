@@ -167,6 +167,40 @@ h1 {
   outline-color: var(--tangerine);
 }
 
+/* Larger boards: same look, tighter spacing so 9x9 still fits a phone. 4x4 is untouched. */
+.panel.size-6 .grid {
+  gap: 9px;
+}
+
+.panel.size-6 .tile {
+  border-radius: 9px;
+  font-size: clamp(22px, 7vw, 30px);
+}
+
+.panel.size-9 {
+  /* Borrow half the page gutter so each 9x9 cell is ~36px wide on a 375px phone. */
+  margin: 0 -8px;
+  padding: 6px;
+  border-radius: 16px;
+}
+
+.panel.size-9 .grid {
+  gap: 5px;
+}
+
+.panel.size-9 .box {
+  gap: 2px;
+}
+
+.panel.size-9 .tile {
+  border-radius: 6px;
+  font-size: clamp(17px, 5.4vw, 24px);
+}
+
+.panel.size-9 .tile.selected {
+  transform: none;
+}
+
 /* Keypad */
 .controls {
   display: flex;
@@ -194,6 +228,19 @@ h1 {
   color: var(--cream);
   font-size: 26px;
   font-weight: 900;
+}
+
+.keypad.size-6 {
+  gap: 6px;
+}
+
+.keypad.size-9 {
+  gap: 4px;
+}
+
+.keypad.size-9 .key {
+  font-size: 22px;
+  border-radius: 10px;
 }
 
 .key.wide {

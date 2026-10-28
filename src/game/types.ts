@@ -1,7 +1,15 @@
-export type Digit = 1 | 2 | 3 | 4;
-/** 0 = empty cell. */
-export type Cell = 0 | Digit;
+/** 0 = empty cell; otherwise a digit 1..size. */
+export type Cell = number;
 export type Grid = Cell[][];
+
+/** Board side length. Each tier has its own: Easy 4, Medium 6, Hard 9. */
+export type BoardSize = 4 | 6 | 9;
+
+/** Box shape in cells: `rows` high by `cols` wide. rows * cols === size. */
+export interface BoxShape {
+  rows: number;
+  cols: number;
+}
 
 export type RuleId = 'A' | 'B' | 'C';
 
@@ -28,6 +36,8 @@ export interface Puzzle {
   /** Draft label; adjust after playtesting. */
   tier: Tier;
   status: PuzzleStatus;
+  size: BoardSize;
+  box: BoxShape;
   givens: Grid;
   rules: RuleCard[];
   falseRuleId: RuleId;

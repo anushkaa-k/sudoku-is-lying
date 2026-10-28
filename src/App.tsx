@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { checkSubmission, type CheckResult } from './game/check';
 import { explain } from './game/explain';
-import { POOL, TIERS, TUTORIALS, tierPuzzles } from './game/pool';
-import { loadFlag, loadSolved, saveFlag, saveSolved } from './game/progress';
-import { DIGITS, SIZE } from './game/solver';
+import { POOL, TIER_SIZE, TIERS, TUTORIALS, tierPuzzles } from './game/pool';
+import { loadFlag, loadSolved, recordKey, saveFlag, saveSolved } from './game/progress';
+import { digitsFor, groupsFor } from './game/solver';
 import type { Cell, Grid, Puzzle, RuleId, Tier } from './game/types';
 
 const TILTS = [-4, 2, -1];
@@ -27,7 +27,7 @@ const FEEDBACK: Record<Exclude<CheckResult, 'solved'>, { title: string; body: st
 const cloneGrid = (g: Grid) => g.map((row) => [...row]) as Grid;
 
 function firstEmpty(g: Grid): [number, number] {
-  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) if (g[r][c] === 0) return [r, c];
+  for (let r = 0; r < g.length; r++) for (let c = 0; c < g.length; c++) if (g[r][c] === 0) return [r, c];
   return [0, 0];
 }
 
@@ -45,9 +45,11 @@ type Mode = Tier | 'tutorial';
 type View = { kind: 'play'; mode: Mode; id: string; replay: boolean } | { kind: 'exhausted'; tier: Tier };
 
 export default function App() {
-  const [solved, setSolved] = useState(loadSolved);
+  // Record keys (id + content fingerprint), so progress can't attach to a changed puzzle.
+  const [solved, setSolved] = useState(() => loadSolved(POOL));
+  const isSolved = (p: Puzzle) => solved.has(recordKey(p));
   const unsolvedIn = (tier: Tier, except?: string) =>
-    tierPuzzles(tier).filter((p) => !solved.has(p.id) && p.id !== except);
+    tierPuzzles(tier).filter((p) => !isSolved(p) && p.id !== except);
 
   /** Deals a random unsolved puzzle from the tier, or reports that none are left. */
   const deal = (tier: Tier, except?: string): View => {
@@ -56,7 +58,7 @@ export default function App() {
     const p = options[Math.floor(Math.random() * options.length)];
     return { kind: 'play', mode: tier, id: p.id, replay: false };
   };
-  const tutorialView = (id: string): View => ({ kind: 'play', mode: 'tutorial', id, replay: solved.has(id) });
+  const tutorialView = (id: string): View => ({ kind: 'play', mode: 'tutorial', id, replay: isSolved(byId(id)) });
 
   // Open straight on a playable puzzle: the first tier with anything unsolved (Easy if all are done).
   const [view, setView] = useState<View>(() => deal(TIERS.find((t) => unsolvedIn(t).length > 0) ?? 'easy'));
@@ -81,11 +83,12 @@ export default function App() {
     saveFlag(SUGGESTION_FLAG);
   };
 
-  const markSolved = (id: string) => {
+  const markSolved = (p: Puzzle) => {
     dismissSuggestion();
+    const key = recordKey(p);
     setSolved((prev) => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev).add(id);
+      if (prev.has(key)) return prev;
+      const next = new Set(prev).add(key);
       saveSolved(next);
       return next;
     });
@@ -95,7 +98,7 @@ export default function App() {
   const pickMode = (m: Mode) => {
     if (m === mode) return;
     if (m === 'tutorial') {
-      const first = TUTORIALS.find((p) => !solved.has(p.id)) ?? TUTORIALS[0];
+      const first = TUTORIALS.find((p) => !isSolved(p)) ?? TUTORIALS[0];
       switchTo(tutorialView(first.id));
     } else switchTo(deal(m));
   };
@@ -147,7 +150,7 @@ export default function App() {
     <main className="app">
       <Header tag={puzzle ? `CASE #${puzzle.caseNumber}` : 'CASE FILES'} label={label}>
         Below are three rules. <strong>Exactly one of them is lying.</strong> The other two are
-        deadly serious. Fill the grid with 1–4, then name the liar. The fixed tiles never lie, and
+        deadly serious. Fill the grid with 1–{puzzle?.size ?? TIER_SIZE[mode === 'tutorial' ? 'easy' : mode]}, then name the liar. The fixed tiles never lie, and
         neither do we. Only the rulebook does, and it’s very proud of itself.
       </Header>
 
@@ -198,7 +201,7 @@ export default function App() {
           onDirty={(d) => {
             dirty.current = d;
           }}
-          onSolved={() => markSolved(puzzle!.id)}
+          onSolved={() => markSolved(puzzle!)}
           winActions={winActions}
         />
       )}
@@ -337,13 +340,14 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
   const [suspect, setSuspect] = useState<RuleId | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
   const tileRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const { size, box } = puzzle;
 
   // After switching puzzles the win panel is gone, so bring the player back to the top of the new case.
   useEffect(() => {
     if (!focusOnMount) return;
     window.scrollTo(0, 0);
     const [r, c] = sel;
-    tileRefs.current[r * SIZE + c]?.focus({ preventScroll: true });
+    tileRefs.current[r * size + c]?.focus({ preventScroll: true });
   }, []);
 
   const solved = result === 'solved';
@@ -365,10 +369,10 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
   };
 
   const move = (r: number, c: number) => {
-    const nr = Math.max(0, Math.min(SIZE - 1, r));
-    const nc = Math.max(0, Math.min(SIZE - 1, c));
+    const nr = Math.max(0, Math.min(size - 1, r));
+    const nc = Math.max(0, Math.min(size - 1, c));
     setSel([nr, nc]);
-    tileRefs.current[nr * SIZE + nc]?.focus();
+    tileRefs.current[nr * size + nc]?.focus();
   };
 
   const onGridKey = (e: KeyboardEvent) => {
@@ -377,7 +381,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
     else if (k === 'ArrowDown') move(sr + 1, sc);
     else if (k === 'ArrowLeft') move(sr, sc - 1);
     else if (k === 'ArrowRight') move(sr, sc + 1);
-    else if (/^[1-4]$/.test(k)) setCell(sr, sc, Number(k) as Cell);
+    else if (/^[1-9]$/.test(k) && Number(k) <= size) setCell(sr, sc, Number(k) as Cell);
     else if (k === 'Backspace' || k === 'Delete' || k === '0') setCell(sr, sc, 0);
     else return;
     e.preventDefault();
@@ -403,7 +407,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
     return (
       <button
         key={`${r}-${c}`}
-        ref={(el) => (tileRefs.current[r * SIZE + c] = el)}
+        ref={(el) => (tileRefs.current[r * size + c] = el)}
         type="button"
         className={`tile${given ? ' given' : ''}${selected ? ' selected' : ''}`}
         tabIndex={selected ? 0 : -1}
@@ -416,34 +420,33 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
     );
   };
 
-  // Render box by box so the gap between 2x2 boxes can be wider than the gap between tiles.
-  const boxes = [0, 1, 2, 3].map((b) => {
-    const r0 = 2 * Math.floor(b / 2);
-    const c0 = 2 * (b % 2);
-    return (
-      <div className="box" key={b}>
-        {tile(r0, c0)}
-        {tile(r0, c0 + 1)}
-        {tile(r0 + 1, c0)}
-        {tile(r0 + 1, c0 + 1)}
-      </div>
-    );
-  });
+  // Render box by box so the gap between boxes can be wider than the gap between tiles.
+  const boxes = groupsFor('C', size, box).map((cells, b) => (
+    <div className="box" key={b} style={{ gridTemplateColumns: `repeat(${box.cols}, minmax(0, 1fr))` }}>
+      {cells.map(([r, c]) => tile(r, c))}
+    </div>
+  ));
 
   // Keep focus on the selected tile when tapping keypad buttons with a pointer.
   const keepFocus = (e: React.PointerEvent) => e.preventDefault();
 
   return (
     <>
-      <section aria-label="Puzzle grid" className="panel">
-        <div className="grid" role="group" aria-label="4 by 4 grid" onKeyDown={onGridKey}>
+      <section aria-label="Puzzle grid" className={`panel size-${size}`}>
+        <div
+          className="grid"
+          role="group"
+          aria-label={`${size} by ${size} grid`}
+          style={{ gridTemplateColumns: `repeat(${size / box.cols}, minmax(0, 1fr))` }}
+          onKeyDown={onGridKey}
+        >
           {boxes}
         </div>
       </section>
 
       <section className="controls" aria-label="Number pad">
-        <div className="keypad">
-          {DIGITS.map((d) => (
+        <div className={`keypad size-${size}`} style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+          {digitsFor(size).map((d) => (
             <button
               key={d}
               type="button"
@@ -519,7 +522,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
         )}
       </div>
 
-      <p className="keys-help">Keyboard: arrows move · 1–4 type · Backspace erases</p>
+      <p className="keys-help">Keyboard: arrows move · 1–{size} type · Backspace erases</p>
     </>
   );
 }

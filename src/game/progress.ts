@@ -1,11 +1,51 @@
-/** Which puzzles this browser has solved, plus small flags. Stored locally only; the game works without it. */
-const KEY = 'lying-sudoku:solved:v1';
+import type { Puzzle } from './types';
 
-export function loadSolved(): Set<string> {
+/**
+ * Solved puzzles, stored locally only; the game works without storage.
+ *
+ * v2 records are `<id>@<fingerprint>`, where the fingerprint hashes the puzzle's
+ * size, box shape, givens, solution and liar. If a puzzle's content ever changes,
+ * its old record simply stops matching instead of carrying over wrongly.
+ *
+ * v1 (`lying-sudoku:solved:v1`) held bare ids from the 4x4-only pool. It is migrated
+ * once, only for ids whose puzzle is still the same 4x4 content, and the v1 key is
+ * left in place untouched rather than wiped.
+ */
+const KEY_V1 = 'lying-sudoku:solved:v1';
+const KEY_V2 = 'lying-sudoku:solved:v2';
+
+/** FNV-1a over the puzzle's identity-defining content, base 36. */
+export function fingerprint(p: Puzzle): string {
+  const text = JSON.stringify([p.size, p.box.rows, p.box.cols, p.givens, p.solution, p.falseRuleId]);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+export const recordKey = (p: Puzzle) => `${p.id}@${fingerprint(p)}`;
+
+const readList = (key: string): string[] => {
+  const raw = localStorage.getItem(key);
+  const list = raw ? JSON.parse(raw) : [];
+  return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+};
+
+/** Record keys of solved puzzles, migrating v1 progress the first time. */
+export function loadSolved(pool: Puzzle[]): Set<string> {
   try {
-    const raw = localStorage.getItem(KEY);
-    const ids = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []);
+    if (localStorage.getItem(KEY_V2) !== null) return new Set(readList(KEY_V2));
+    const v1 = readList(KEY_V1);
+    const migrated = v1.flatMap((id) => {
+      const p = pool.find((q) => q.id === id);
+      // Every v1 record came from a 4x4 puzzle; only carry it over if that is still what the id names.
+      return p && p.size === 4 ? [recordKey(p)] : [];
+    });
+    const solved = new Set(migrated);
+    if (v1.length) saveSolved(solved);
+    return solved;
   } catch {
     return new Set();
   }
@@ -13,7 +53,7 @@ export function loadSolved(): Set<string> {
 
 export function saveSolved(solved: Set<string>): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify([...solved]));
+    localStorage.setItem(KEY_V2, JSON.stringify([...solved]));
   } catch {
     // Private mode or blocked storage: progress just won't survive a refresh.
   }

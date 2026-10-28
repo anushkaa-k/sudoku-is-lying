@@ -1,77 +1,109 @@
 /**
- * Independent brute-force check of every puzzle in the pool. It does not use the
- * app's solver: it tries every 1-4 fill of the empty cells and counts the grids
- * that satisfy the two rules left over when each candidate liar is ignored.
+ * The fairness gate for every puzzle in the pool, at every board size.
+ * Uses scripts/lib/checker.ts, which is independent of the app's src/game code.
  *
- * A puzzle passes only if exactly one liar gives exactly one grid, the other two
- * give none, and that liar and grid match what the pool stores.
+ * For each puzzle and each candidate liar (A rows, B columns, C boxes) it runs:
+ *  - a backtracking count (capped at 2) with a node and time budget. A search that
+ *    hits its budget proves nothing: the puzzle is reported UNVERIFIABLE, never 0 or 1.
+ *  - a singles-only logic pass (naked + hidden singles, no guessing).
+ * A puzzle PASSES only if:
+ *  - the stored liar gives exactly 1 solution, equal to the stored solution, and the
+ *    singles pass fills the whole grid (the solve is deducible);
+ *  - each other liar gives 0 solutions, and the singles pass reaches a contradiction
+ *    (the lie is deducible, not a guess);
+ *  - the stored solution breaks the liar and obeys the other two rules, keeps every
+ *    given, uses digits 1..size, and the board size and box shape match its tier.
+ * Anything not PASS must not ship: the script exits non-zero if a non-draft puzzle
+ * fails or is unverifiable.
  *
- * Run: npm run verify   (exits non-zero if any non-draft puzzle fails)
+ * Run: npm run verify
+ *      npm run verify -- --nodes 50 --ms 1000     (tighter budget, to see UNVERIFIABLE)
+ *      npm run verify -- --walkthroughs docs/WALKTHROUGHS.md
  */
-import { POOL } from '../src/game/pool';
-import type { Grid, RuleId } from '../src/game/types';
+import { writeFileSync } from 'fs';
+import { POOL, TIER_SIZE } from '../src/game/pool';
+import type { Puzzle } from '../src/game/types';
+import { DEFAULT_BUDGET, gate, RULES, visibleRepeat, type Budget, type GateReport, type Geometry } from './lib/checker';
+import { walkthrough } from './lib/walkthrough';
 
-const RULES: RuleId[] = ['A', 'B', 'C'];
+const arg = (name: string) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+};
+const budget: Budget = {
+  maxNodes: Number(arg('nodes') ?? DEFAULT_BUDGET.maxNodes),
+  maxMs: Number(arg('ms') ?? DEFAULT_BUDGET.maxMs),
+};
+const walkthroughFile = arg('walkthroughs');
 
-function cellsOf(rule: RuleId, i: number): [number, number][] {
-  return [0, 1, 2, 3].map((j): [number, number] =>
-    rule === 'A' ? [i, j] : rule === 'B' ? [j, i] : [2 * Math.floor(i / 2) + Math.floor(j / 2), 2 * (i % 2) + (j % 2)],
-  );
-}
+const geoOf = (p: Puzzle): Geometry => ({ size: p.size, boxRows: p.box.rows, boxCols: p.box.cols });
+const EXPECTED_BOX: Record<number, string> = { 4: '2x2', 6: '2x3', 9: '3x3' };
 
-function holds(g: number[][], rule: RuleId): boolean {
-  for (let i = 0; i < 4; i++) {
-    const vals = cellsOf(rule, i).map(([r, c]) => g[r][c]);
-    if (new Set(vals).size !== 4 || vals.some((v) => v < 1 || v > 4)) return false;
-  }
-  return true;
-}
+console.log(`Budget per search: ${budget.maxNodes} nodes, ${budget.maxMs} ms\n`);
 
-/** Every grid matching the givens that satisfies the two rules other than `liar`. */
-function completions(givens: Grid, liar: RuleId): number[][][] {
-  const enforced = RULES.filter((r) => r !== liar);
-  const empties: [number, number][] = [];
-  givens.forEach((row, r) => row.forEach((v, c) => v === 0 && empties.push([r, c])));
-  const g = givens.map((row) => [...row]) as number[][];
-  const found: number[][][] = [];
-  for (let k = 0; k < 4 ** empties.length; k++) {
-    let x = k;
-    for (const [r, c] of empties) {
-      g[r][c] = (x % 4) + 1;
-      x = Math.floor(x / 4);
-    }
-    if (enforced.every((rule) => holds(g, rule))) found.push(g.map((row) => [...row]));
-  }
-  return found;
-}
-
-const same = (a: number[][], b: number[][]) => a.every((row, r) => row.every((v, c) => v === b[r][c]));
-const mark = (b: boolean) => (b ? 'PASS' : 'FAIL');
-
-let ok = true;
-let passed = 0;
+const results: { p: Puzzle; report: GateReport }[] = [];
 const ids = new Set<string>();
 for (const p of POOL) {
-  console.log(`${p.id}  "${p.name}"  tier: ${p.tier}  status: ${p.status}  stored liar: Rule ${p.falseRuleId}`);
-  const found = RULES.map((liar) => completions(p.givens, liar));
-  console.log('  ' + RULES.map((liar, j) => `if ${liar} lies: ${found[j].length}`).join('   '));
-  const viable = RULES.filter((_, j) => found[j].length > 0);
-  const liarIdx = RULES.indexOf(p.falseRuleId);
-  const checks: [string, boolean][] = [
-    ['exactly one liar has solutions, exactly 1', viable.length === 1 && found[RULES.indexOf(viable[0])].length === 1],
-    [`that liar is the stored one (Rule ${p.falseRuleId})`, viable.length === 1 && viable[0] === p.falseRuleId],
-    ['the one grid is the stored solution', found[liarIdx].length === 1 && same(found[liarIdx][0], p.solution)],
-    [`stored solution breaks ${p.falseRuleId}, keeps the other two`, RULES.every((r) => holds(p.solution, r) === (r !== p.falseRuleId))],
-    ['stored solution keeps every given', p.givens.every((row, r) => row.every((v, c) => v === 0 || v === p.solution[r][c]))],
-    ['unique id', !ids.has(p.id)],
-  ];
+  const geo = geoOf(p);
+  const report = gate({ geo, givens: p.givens.flat(), solution: p.solution.flat(), liar: p.falseRuleId }, budget);
+  // Pool-level checks the checker can't know about.
+  const shape = `${p.box.rows}x${p.box.cols}`;
+  if (p.givens.length !== p.size || p.givens.some((r) => r.length !== p.size)) report.problems.push('givens are not size x size');
+  if (EXPECTED_BOX[p.size] !== shape) report.problems.push(`box shape ${shape} is not the ${EXPECTED_BOX[p.size]} this size uses`);
+  if (p.status === 'live' && TIER_SIZE[p.tier] !== p.size) report.problems.push(`${p.tier} serves ${TIER_SIZE[p.tier]}x${TIER_SIZE[p.tier]}, not ${p.size}x${p.size}`);
+  if (ids.has(p.id)) report.problems.push('duplicate id');
   ids.add(p.id);
-  for (const [label, pass] of checks) console.log(`  ${mark(pass)}  ${label}`);
-  const pass = checks.every(([, b]) => b);
-  if (pass) passed++;
-  else if (p.status === 'draft') console.log('  (draft: not shipped)');
-  else ok = false;
+  if (report.verdict === 'PASS' && report.problems.length) report.verdict = 'FAIL';
+  results.push({ p, report });
+
+  console.log(`${p.id}  "${p.name}"  ${p.size}x${p.size} (${shape} boxes)  tier: ${p.tier}  status: ${p.status}  stored liar: Rule ${p.falseRuleId}`);
+  for (const h of report.hypotheses) {
+    const c = h.count;
+    const count =
+      c.status === 'aborted' ? `UNFINISHED (${c.reason}, ${c.nodes} nodes)` : `${c.capped ? '2+' : c.count} solution(s) [search complete, ${c.nodes} nodes]`;
+    const logic =
+      h.logic.outcome === 'solved'
+        ? `singles solve it in ${h.logic.steps.length} steps`
+        : h.logic.outcome === 'contradiction'
+          ? `singles reach a contradiction after ${h.logic.steps.length} steps`
+          : `singles get stuck after ${h.logic.steps.length} steps`;
+    console.log(`  if ${h.liar} lies: ${count}; ${logic}`);
+  }
+  console.log(`  givens: ${p.givens.flat().filter(Boolean).length}/${p.size * p.size}, visible repeat: ${visibleRepeat(geo, p.givens.flat()) ? 'yes' : 'no'}`);
+  for (const problem of report.problems) console.log(`  - ${problem}`);
+  console.log(`  => ${report.verdict}${report.verdict !== 'PASS' ? (p.status === 'draft' ? ' (draft, not shipped)' : ' (must be discarded)') : ''}\n`);
 }
-console.log(`\n${passed}/${POOL.length} puzzles pass.`);
-console.log(ok ? 'All shipped puzzles verified.' : 'VERIFICATION FAILED: a shipped puzzle does not pass.');
-process.exit(ok ? 0 : 1);
+
+console.log('Summary');
+console.log('  id            size  tier    status    liar  verdict');
+for (const { p, report } of results) {
+  console.log(`  ${p.id.padEnd(14)}${`${p.size}x${p.size}`.padEnd(6)}${p.tier.padEnd(8)}${p.status.padEnd(10)}${p.falseRuleId.padEnd(6)}${report.verdict}`);
+}
+const shipped = results.filter(({ p }) => p.status !== 'draft');
+const bad = shipped.filter(({ report }) => report.verdict !== 'PASS');
+const count = (v: string) => results.filter(({ report }) => report.verdict === v).length;
+console.log(`\n${count('PASS')} pass, ${count('FAIL')} fail, ${count('UNVERIFIABLE')} unverifiable, of ${results.length} puzzles.`);
+console.log(bad.length ? `VERIFICATION FAILED: ${bad.map(({ p }) => p.id).join(', ')} must not ship.` : 'All shipped puzzles verified.');
+
+if (walkthroughFile && !bad.length) {
+  const lines = [
+    '# Walkthroughs: Medium and Hard',
+    '',
+    'Generated by `npm run verify -- --walkthroughs docs/WALKTHROUGHS.md` from the',
+    'verify gate\'s own singles-only traces (naked and hidden singles, no guessing).',
+    'Cells are RrowCcolumn, counted from the top-left. Boxes are numbered left to right, top to bottom.',
+    '',
+  ];
+  for (const { p } of results.filter(({ p }) => p.status === 'live' && p.size > 4)) {
+    const w = walkthrough(geoOf(p), p.givens.flat(), p.falseRuleId);
+    lines.push(`## Case #${p.caseNumber} "${p.name}" (${p.tier}, ${p.size}x${p.size}, ${p.box.rows}x${p.box.cols} boxes)`, '');
+    lines.push('**Spot the liar.** Test each rule as the possible liar:', '');
+    for (const r of w.refutations) lines.push(`- ${r.text}`);
+    lines.push('', `**Solve.** ${w.solveIntro}`, '');
+    w.solveSteps.forEach((s, i) => lines.push(`${i + 1}. ${s}`));
+    lines.push('');
+  }
+  writeFileSync(walkthroughFile, lines.join('\n'));
+  console.log(`Walkthroughs written to ${walkthroughFile}`);
+}
+process.exit(bad.length ? 1 : 0);

@@ -1,16 +1,38 @@
 /**
- * Authoring aid, not part of the app. Searches for candidate puzzles the way Level 2
- * was found: take a grid that obeys exactly two rules, then strip givens while
- * "exactly one liar has exactly one solution" still holds. Candidates are only
- * drafts until they are added to the pool and pass `npm run verify`.
+ * Authoring aid, not part of the app. Finds candidate puzzles for a board size:
+ *  1. build a grid that obeys the two honest rules and breaks the liar: either a
+ *     random fill, or (subtler) a valid standard grid broken by a few swaps that
+ *     only the liar's rule can notice;
+ *  2. strip givens one at a time, keeping a removal only if, with singles alone,
+ *     the true liar still solves completely and both wrong liars still hit a
+ *     contradiction (so the lie stays deducible);
+ *  3. reject anything whose givens visibly repeat a digit (the lie would be free);
+ *  4. optionally pad back up to a fixed clue count, so every liar in a tier gets the
+ *     same number of givens and the count itself can't hint at the liar. (When rows
+ *     or columns lie, the grid splits into independent stacks/bands, which needs
+ *     far more givens than when boxes lie.)
+ * Candidates are drafts until they are in the pool and pass `npm run verify`.
  *
- * Run: npm run search
+ * Run: npm run search -- <size> [trials] [random|subtle] [clues]
+ *      e.g. npm run search -- 9 40 subtle 54
  */
-import { countIfFalse, groupsFor, ruleHolds, solveAll, RULE_IDS } from '../src/game/solver';
-import type { Grid, RuleId } from '../src/game/types';
+import { groups, holds, logicSolve, RULES, visibleRepeat, type Geometry, type Rule } from './lib/checker';
 
-let seed = 20261028;
-const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+const GEOS: Record<number, Geometry> = {
+  4: { size: 4, boxRows: 2, boxCols: 2 },
+  6: { size: 6, boxRows: 2, boxCols: 3 },
+  9: { size: 9, boxRows: 3, boxCols: 3 },
+};
+
+const size = Number(process.argv[2] ?? 6);
+const trials = Number(process.argv[3] ?? 30);
+const style = process.argv[4] === 'random' ? 'random' : 'subtle';
+const targetClues = Number(process.argv[5] ?? 0);
+const geo = GEOS[size];
+if (!geo) throw new Error(`no geometry for size ${size}`);
+
+let seed = 7_000 + size;
+const rand = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
 const shuffle = <T>(xs: T[]) => {
   const a = [...xs];
   for (let i = a.length - 1; i > 0; i--) {
@@ -20,104 +42,138 @@ const shuffle = <T>(xs: T[]) => {
   return a;
 };
 
-const CELLS = Array.from({ length: 16 }, (_, k): [number, number] => [Math.floor(k / 4), k % 4]);
-
-function uniqueLiar(givens: Grid, liar: RuleId): boolean {
-  return RULE_IDS.every((id) => countIfFalse(givens, id).length === (id === liar ? 1 : 0));
-}
-
-/** True when the givens alone already repeat a digit in some row, column or box. */
-function visibleRepeat(givens: Grid): boolean {
-  return RULE_IDS.some((id) =>
-    groupsFor(id).some((g) => {
-      const vals = g.map(([r, c]) => givens[r][c]).filter((v) => v !== 0);
-      return new Set(vals).size !== vals.length;
-    }),
-  );
-}
-
-const count = (g: Grid) => g.flat().filter((v) => v !== 0).length;
-const key = (g: Grid) => g.flat().join('');
-
-/** Remove givens in random order while the unique-liar property holds. */
-function strip(solution: Grid, liar: RuleId, keep: Set<number> = new Set()): Grid {
-  const g = solution.map((r) => [...r]) as Grid;
-  for (const k of shuffle(CELLS.map((_, i) => i))) {
-    if (keep.has(k)) continue;
-    const [r, c] = CELLS[k];
-    const v = g[r][c];
-    g[r][c] = 0;
-    if (!uniqueLiar(g, liar)) g[r][c] = v;
-  }
-  return g;
-}
-
-/** Put back `extra` solution cells without creating a visible repeat (unless allowed). */
-function pad(givens: Grid, solution: Grid, extra: number, allowRepeat: boolean): Grid {
-  const g = givens.map((r) => [...r]) as Grid;
-  for (const k of shuffle(CELLS.map((_, i) => i))) {
-    if (extra === 0) break;
-    const [r, c] = CELLS[k];
-    if (g[r][c] !== 0) continue;
-    g[r][c] = solution[r][c];
-    if (!allowRepeat && visibleRepeat(g)) g[r][c] = 0;
-    else extra--;
-  }
-  return g;
-}
-
-const seen = new Set<string>();
-// Tutorial solutions are already taken.
-seen.add('1212343421214343');
-seen.add('4213243113243142');
-const out: Record<string, { liar: RuleId; givens: Grid; solution: Grid; n: number }[]> = {
-  easy: [],
-  medium: [],
-  hard: [],
-};
-
-for (const liar of RULE_IDS) {
-  const others = RULE_IDS.filter((r) => r !== liar);
-  const sols = shuffle(solveAll([0, 0, 0, 0].map(() => [0, 0, 0, 0]) as Grid, others)).filter(
-    (s) => !ruleHolds(s, liar),
-  );
-  const hard: Grid[] = [];
-  const medium: Grid[] = [];
-  const easy: Grid[] = [];
-  for (const sol of sols.slice(0, 60)) {
-    const m = strip(sol, liar);
-    if (!visibleRepeat(m)) {
-      hard.push(m);
-      medium.push(pad(m, sol, 2, false));
+/** Random grid obeying `enforced` (randomised backtracking, most-constrained cell first). */
+function randomFill(enforced: Rule[]): number[] | null {
+  const n = geo.size;
+  const gs = enforced.flatMap((r) => groups(geo, r));
+  const ofCell: number[][] = Array.from({ length: n * n }, () => []);
+  gs.forEach((g, gi) => g.forEach((k) => ofCell[k].push(gi)));
+  const used = new Array(gs.length).fill(0);
+  const grid = new Array(n * n).fill(0);
+  let nodes = 0;
+  const go = (): boolean => {
+    if (++nodes > 200_000) return false;
+    let best = -1;
+    let bestC: number[] = [];
+    for (let k = 0; k < grid.length; k++) {
+      if (grid[k]) continue;
+      const m = ofCell[k].reduce((a, gi) => a | used[gi], 0);
+      const c = [];
+      for (let d = 1; d <= n; d++) if (!(m & (1 << (d - 1)))) c.push(d);
+      if (c.length === 0) return false;
+      if (best === -1 || c.length < bestC.length) [best, bestC] = [k, c];
     }
-    // Easy: keep a pair of tiles that visibly repeat inside one of the liar's groups.
-    const bad = groupsFor(liar).find((g) => new Set(g.map(([r, c]) => sol[r][c])).size < 4)!;
-    const [p, q] = bad.flatMap((a, i) => bad.slice(i + 1).map((b) => [a, b])).find(
-      ([a, b]) => sol[a[0]][a[1]] === sol[b[0]][b[1]],
-    )!;
-    const e = strip(sol, liar, new Set([p[0] * 4 + p[1], q[0] * 4 + q[1]]));
-    easy.push(pad(e, sol, Math.max(0, 9 - count(e)), true));
-  }
-  const pickFrom = (tier: string, grids: Grid[], order: (a: Grid, b: Grid) => number) => {
-    // One puzzle per solution grid, so no two tiers share an answer.
-    const g = [...grids]
-      .sort(order)
-      .find((x) => uniqueLiar(x, liar) && !seen.has(key(countIfFalse(x, liar)[0])));
-    if (!g) return;
-    const solution = countIfFalse(g, liar)[0];
-    seen.add(key(solution));
-    out[tier].push({ liar, givens: g, solution, n: count(g) });
+    if (best === -1) return true;
+    for (const d of shuffle(bestC)) {
+      grid[best] = d;
+      ofCell[best].forEach((gi) => (used[gi] |= 1 << (d - 1)));
+      if (go()) return true;
+      ofCell[best].forEach((gi) => (used[gi] &= ~(1 << (d - 1))));
+      grid[best] = 0;
+    }
+    return false;
   };
-  pickFrom('hard', hard, (a, b) => count(a) - count(b));
-  pickFrom('medium', medium, (a, b) => count(b) - count(a));
-  pickFrom('easy', easy, (a, b) => count(b) - count(a));
+  return go() ? grid : null;
 }
 
-for (const [tier, list] of Object.entries(out)) {
-  console.log(`\n${tier.toUpperCase()}`);
-  for (const p of list) {
-    console.log(`  liar ${p.liar}, ${p.n} givens, visible repeat: ${visibleRepeat(p.givens)}`);
-    console.log(`    givens:   ${JSON.stringify(p.givens)}`);
-    console.log(`    solution: ${JSON.stringify(p.solution)}`);
+/**
+ * A valid standard grid, then 1-2 swaps that keep the honest rules intact:
+ *  A (rows lie):    swap two cells in one column inside one box
+ *  B (columns lie): swap two cells in one row inside one box
+ *  C (boxes lie):   swap two whole rows from different bands
+ */
+function subtleFill(liar: Rule): number[] | null {
+  const n = geo.size;
+  const g = randomFill(RULES);
+  if (!g) return null;
+  const swaps = 1 + Math.floor(rand() * 2);
+  for (let s = 0; s < swaps; s++) {
+    if (liar === 'C') {
+      const bands = n / geo.boxRows;
+      const b1 = Math.floor(rand() * bands);
+      const b2 = (b1 + 1 + Math.floor(rand() * (bands - 1))) % bands;
+      const r1 = b1 * geo.boxRows + Math.floor(rand() * geo.boxRows);
+      const r2 = b2 * geo.boxRows + Math.floor(rand() * geo.boxRows);
+      for (let c = 0; c < n; c++) [g[r1 * n + c], g[r2 * n + c]] = [g[r2 * n + c], g[r1 * n + c]];
+    } else {
+      // Two distinct cells sharing a column (A) or a row (B), inside the same box.
+      const box = groups(geo, 'C')[Math.floor(rand() * n)];
+      const [a, b] = shuffle(box)
+        .flatMap((x, i, xs) => xs.slice(i + 1).map((y) => [x, y]))
+        .find(([x, y]) => (liar === 'A' ? x % n === y % n : Math.floor(x / n) === Math.floor(y / n)))!;
+      [g[a], g[b]] = [g[b], g[a]];
+    }
+  }
+  return g;
+}
+
+function deducible(givens: number[], liar: Rule): boolean {
+  return RULES.every((h) => {
+    const out = logicSolve(geo, givens, RULES.filter((r) => r !== h)).outcome;
+    return h === liar ? out === 'solved' : out === 'contradiction';
+  });
+}
+
+interface Candidate {
+  liar: Rule;
+  givens: number[];
+  solution: number[];
+  clues: number;
+  /** Singles needed before each wrong liar collapses. */
+  refute: Record<string, number>;
+  solveSteps: number;
+}
+
+function candidate(liar: Rule): Candidate | null {
+  const enforced = RULES.filter((r) => r !== liar);
+  const solution = style === 'subtle' ? subtleFill(liar) : randomFill(enforced);
+  if (!solution || holds(geo, solution, liar) || !enforced.every((r) => holds(geo, solution, r))) return null;
+  const givens = [...solution];
+  // Strip the liar's repeats first so the final givens are less likely to show one.
+  const repeatCells = new Set(
+    groups(geo, liar).flatMap((g) => g.filter((k) => g.some((o) => o !== k && solution[o] === solution[k]))),
+  );
+  const order = [...shuffle([...repeatCells]), ...shuffle(givens.map((_, k) => k).filter((k) => !repeatCells.has(k)))];
+  for (const k of order) {
+    const v = givens[k];
+    givens[k] = 0;
+    if (!deducible(givens, liar)) givens[k] = v;
+  }
+  if (visibleRepeat(geo, givens)) return null;
+  // Pad up to the tier's clue count with solution cells that keep the lie hidden.
+  for (const k of shuffle(givens.map((_, i) => i))) {
+    if (givens.filter(Boolean).length >= targetClues) break;
+    if (givens[k]) continue;
+    givens[k] = solution[k];
+    if (visibleRepeat(geo, givens) || !deducible(givens, liar)) givens[k] = 0;
+  }
+  if (targetClues && givens.filter(Boolean).length !== targetClues) return null;
+  const refute: Record<string, number> = {};
+  for (const h of RULES) if (h !== liar) refute[h] = logicSolve(geo, givens, RULES.filter((r) => r !== h)).steps.length;
+  return {
+    liar,
+    givens,
+    solution,
+    clues: givens.filter(Boolean).length,
+    refute,
+    solveSteps: logicSolve(geo, givens, enforced).steps.length,
+  };
+}
+
+const rows = (g: number[]) => Array.from({ length: geo.size }, (_, r) => g.slice(r * geo.size, (r + 1) * geo.size));
+
+for (const liar of RULES) {
+  const found: Candidate[] = [];
+  for (let t = 0; t < trials; t++) {
+    const c = candidate(liar);
+    if (c) found.push(c);
+  }
+  console.log(`\nliar ${liar}: ${found.length}/${trials} trials gave a candidate with no visible repeat`);
+  // Fairest first: shortest worst-case refutation, then more clues.
+  found.sort((a, b) => Math.max(...Object.values(a.refute)) - Math.max(...Object.values(b.refute)) || b.clues - a.clues);
+  for (const c of found.slice(0, 3)) {
+    console.log(`  ${c.clues} clues, refutations ${JSON.stringify(c.refute)}, true solve ${c.solveSteps} singles`);
+    console.log(`    givens:   ${JSON.stringify(rows(c.givens))}`);
+    console.log(`    solution: ${JSON.stringify(rows(c.solution))}`);
   }
 }
