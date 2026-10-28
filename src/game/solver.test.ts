@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { checkSubmission } from './check';
-import { PUZZLES, TUTORIAL } from './puzzles';
+import { LEVELS, TUTORIAL } from './puzzles';
 import { countIfFalse, gridsEqual, ruleHolds, solveAll, RULE_IDS } from './solver';
-import type { Grid } from './types';
+import type { Grid, RuleId } from './types';
 
 const clone = (g: Grid) => g.map((r) => [...r]) as Grid;
 
@@ -13,8 +13,18 @@ describe('solver sanity', () => {
   });
 });
 
-describe('tutorial puzzle: always-truthful contract', () => {
-  const p = TUTORIAL;
+const EXPECTED: Record<string, { liar: RuleId; counts: Record<RuleId, number> }> = {
+  'tutorial-001': { liar: 'A', counts: { A: 1, B: 0, C: 0 } },
+  'level-002': { liar: 'C', counts: { A: 0, B: 0, C: 1 } },
+};
+
+describe.each(LEVELS.map((p) => [p.label, p] as const))('%s: always-truthful contract', (_label, p) => {
+  const expected = EXPECTED[p.id];
+
+  it('has an expected-results entry and the right liar', () => {
+    expect(expected).toBeDefined();
+    expect(p.falseRuleId).toBe(expected.liar);
+  });
 
   it('uses only digits 0-4 in givens and 1-4 in the solution', () => {
     expect(p.givens.flat().every((v) => v >= 0 && v <= 4)).toBe(true);
@@ -29,21 +39,12 @@ describe('tutorial puzzle: always-truthful contract', () => {
     );
   });
 
-  it('has exactly three rule cards with the false one among them', () => {
+  it('has exactly three rule cards A, B, C', () => {
     expect(p.rules.map((r) => r.id)).toEqual(['A', 'B', 'C']);
-    expect(RULE_IDS).toContain(p.falseRuleId);
   });
 
-  it('if A is false (B+C enforced): exactly 1 completion', () => {
-    expect(countIfFalse(p.givens, 'A')).toHaveLength(1);
-  });
-
-  it('if B is false (A+C enforced): 0 completions', () => {
-    expect(countIfFalse(p.givens, 'B')).toHaveLength(0);
-  });
-
-  it('if C is false (A+B enforced): 0 completions', () => {
-    expect(countIfFalse(p.givens, 'C')).toHaveLength(0);
+  it.each(RULE_IDS)('if %s is false (other two enforced): expected completion count', (id) => {
+    expect(countIfFalse(p.givens, id)).toHaveLength(expected.counts[id]);
   });
 
   it('standard Sudoku (A+B+C enforced): 0 completions', () => {
@@ -51,22 +52,16 @@ describe('tutorial puzzle: always-truthful contract', () => {
   });
 
   it('the unique completion equals the stored solution', () => {
-    const [only] = countIfFalse(p.givens, 'A');
+    const [only] = countIfFalse(p.givens, p.falseRuleId);
     expect(gridsEqual(only, p.solution)).toBe(true);
   });
 
-  it('the unique completion actually violates A and satisfies B and C', () => {
-    expect(ruleHolds(p.solution, 'A')).toBe(false);
-    expect(ruleHolds(p.solution, 'B')).toBe(true);
-    expect(ruleHolds(p.solution, 'C')).toBe(true);
+  it('the stored solution violates the liar and satisfies the other two', () => {
+    for (const id of RULE_IDS) expect(ruleHolds(p.solution, id)).toBe(id !== p.falseRuleId);
   });
 
-  it('every shipped puzzle has exactly one viable false card', () => {
-    for (const puzzle of PUZZLES) {
-      const counts = RULE_IDS.map((id) => countIfFalse(puzzle.givens, id).length);
-      expect(counts.filter((n) => n > 0)).toEqual([1]);
-      expect(countIfFalse(puzzle.givens, puzzle.falseRuleId)).toHaveLength(1);
-    }
+  it('explanation names the liar', () => {
+    expect(p.explanation).toContain(`Rule ${p.falseRuleId}`);
   });
 });
 

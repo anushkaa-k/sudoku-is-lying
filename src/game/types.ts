@@ -14,6 +14,8 @@ export interface RuleCard {
 export interface Puzzle {
   id: string;
   caseNumber: string;
+  /** Small label above the headline, e.g. "Level 1: Tutorial". */
+  label: string;
   givens: Grid;
   rules: RuleCard[];
   falseRuleId: RuleId;

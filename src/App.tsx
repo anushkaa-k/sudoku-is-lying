@@ -1,13 +1,13 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { checkSubmission, type CheckResult } from './game/check';
-import { TUTORIAL } from './game/puzzles';
+import { LEVELS } from './game/puzzles';
 import { DIGITS, SIZE } from './game/solver';
-import type { Cell, Grid, RuleId } from './game/types';
+import type { Cell, Grid, Puzzle, RuleId } from './game/types';
 
-const puzzle = TUTORIAL;
 const TILTS = [-4, 2, -1];
 
-const FEEDBACK: Record<CheckResult, { title: string; body: string }> = {
+/** Failure copy is the same for every level and never hints at which rule lies. */
+const FEEDBACK: Record<Exclude<CheckResult, 'solved'>, { title: string; body: string }> = {
   incomplete: {
     title: 'Not finished yet.',
     body: 'There are still empty tiles. The rulebook refuses to be judged on a half-done job.',
@@ -20,21 +20,51 @@ const FEEDBACK: Record<CheckResult, { title: string; body: string }> = {
     title: 'Not solved yet.',
     body: 'Something in your case doesn’t hold up. We’re not saying what. We’re enjoying this.',
   },
-  solved: {
-    title: 'Case closed.',
-    body: puzzle.explanation,
-  },
 };
 
 const cloneGrid = (g: Grid) => g.map((row) => [...row]) as Grid;
-const isGiven = (r: number, c: number) => puzzle.givens[r][c] !== 0;
+
+function firstEmpty(g: Grid): [number, number] {
+  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) if (g[r][c] === 0) return [r, c];
+  return [0, 0];
+}
 
 export default function App() {
+  const [level, setLevel] = useState(0);
+  const hasNext = level + 1 < LEVELS.length;
+  // Keyed by level so a new puzzle starts with fresh grid, suspect and result state.
+  return (
+    <Game
+      key={level}
+      puzzle={LEVELS[level]}
+      focusOnMount={level > 0}
+      onNext={hasNext ? () => setLevel(level + 1) : undefined}
+    />
+  );
+}
+
+interface GameProps {
+  puzzle: Puzzle;
+  focusOnMount: boolean;
+  /** Absent on the last level. */
+  onNext?: () => void;
+}
+
+function Game({ puzzle, focusOnMount, onNext }: GameProps) {
+  const isGiven = (r: number, c: number) => puzzle.givens[r][c] !== 0;
   const [grid, setGrid] = useState<Grid>(() => cloneGrid(puzzle.givens));
-  const [sel, setSel] = useState<[number, number]>([0, 2]);
+  const [sel, setSel] = useState<[number, number]>(() => firstEmpty(puzzle.givens));
   const [suspect, setSuspect] = useState<RuleId | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
   const tileRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // After "Next puzzle" the win panel is gone, so bring the player back to the top of the new case.
+  useEffect(() => {
+    if (!focusOnMount) return;
+    window.scrollTo(0, 0);
+    const [r, c] = sel;
+    tileRefs.current[r * SIZE + c]?.focus({ preventScroll: true });
+  }, []);
 
   const solved = result === 'solved';
   const [sr, sc] = sel;
@@ -122,7 +152,10 @@ export default function App() {
   return (
     <main className="app">
       <header>
-        <span className="tag">CASE #{puzzle.caseNumber}</span>
+        <div className="tag-row">
+          <span className="tag">CASE #{puzzle.caseNumber}</span>
+          <span className="level">{puzzle.label}</span>
+        </div>
         <h1>
           One rule is <span className="chip">full of it.</span>
         </h1>
@@ -202,8 +235,18 @@ export default function App() {
       <div className={`feedback${result ? ` ${result}` : ''}`} role="status" aria-live="polite">
         {result && (
           <>
-            <p className="feedback-title">{FEEDBACK[result].title}</p>
-            <p>{FEEDBACK[result].body}</p>
+            <p className="feedback-title">{solved ? 'Case closed.' : FEEDBACK[result].title}</p>
+            <p>{solved ? puzzle.explanation : FEEDBACK[result].body}</p>
+            {solved &&
+              (onNext ? (
+                <button type="button" className="next" onClick={onNext}>
+                  Next puzzle
+                </button>
+              ) : (
+                <p className="more">
+                  More puzzles coming. The rulebook is busy drafting fresh lies.
+                </p>
+              ))}
           </>
         )}
       </div>
