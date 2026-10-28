@@ -1,6 +1,6 @@
 # Sudoku, but the Rules Are Lying
 
-Local prototype (React + TypeScript + Vite). A pool of 4×4 cases: two tutorial levels, then Easy / Medium / Hard picks.
+Local prototype (React + TypeScript + Vite). A pool of 4×4 cases with an Easy / Medium / Hard selector above the grid, plus an optional two-level tutorial.
 
 Contract: digits 1–4 only, givens never change, exactly one of the three rule
 cards is false and simply isn't enforced; the other two apply.

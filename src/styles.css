@@ -345,87 +345,111 @@ h1 {
   font-weight: 900;
 }
 
-/* Difficulty picker: same palette, page-teal buttons so they read on a panel */
-.picker-title {
-  margin: 0 0 10px;
-  font-size: 20px;
-  font-weight: 900;
-}
-
-.tiers {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+/* Difficulty selector above the grid: same palette as the keypad, selected = yellow outline */
+.modes-wrap {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.tier {
-  min-height: 72px;
+.modes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mode {
+  min-height: 56px;
   border: 0;
   border-radius: 14px;
-  background: var(--bg);
+  background: var(--panel);
   color: var(--cream);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  box-shadow: 0 4px 0 var(--bg-deep);
+  gap: 2px;
+  padding: 6px 2px;
 }
 
-.tier:active {
-  transform: translateY(2px);
-  box-shadow: 0 2px 0 var(--bg-deep);
+.mode[aria-pressed='true'] {
+  outline: 3px solid var(--yellow);
+  outline-offset: -3px;
 }
 
-.tier-name {
-  font-size: 19px;
+.mode-name {
+  font-size: 16px;
   font-weight: 900;
 }
 
-.tier-count {
-  font-size: 13px;
+.mode-count {
+  font-size: 12px;
   font-weight: 800;
   color: var(--muted);
 }
 
-.picker-note {
-  margin: 10px 0 0 !important;
-  font-size: 16px;
-  font-weight: 800;
+.key.wide.sub {
+  min-height: 44px;
+  font-size: 15px;
+}
+
+.key.wide.sub[aria-pressed='true'] {
   color: var(--cream);
+  outline: 3px solid var(--yellow);
+  outline-offset: -3px;
 }
 
-.picker-note:empty {
-  display: none;
+.suggest,
+.confirm {
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
-.picker-sub {
-  margin: 16px 0 8px !important;
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--muted);
+.suggest p,
+.confirm p {
+  margin: 0 0 12px;
 }
 
-.feedback .picker {
-  margin-top: 14px;
-}
-
-.picker .key.wide {
+.suggest .key.wide,
+.confirm .key.wide,
+.exhausted .key.wide {
   background: var(--bg);
   min-height: 48px;
   font-size: 16px;
 }
 
-.back {
-  align-self: center;
-  border: 0;
-  background: none;
-  color: var(--muted);
+.confirm {
+  outline: 3px solid var(--tangerine);
+}
+
+.confirm-title,
+.exhausted-title {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--cream);
+}
+
+.exhausted {
   font-size: 16px;
-  font-weight: 800;
-  padding: 8px 12px;
-  text-decoration: underline;
-  text-underline-offset: 4px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.exhausted p {
+  margin: 0 0 12px;
+}
+
+.exhausted:focus {
+  outline: none;
+}
+
+.replays {
+  display: grid;
+  gap: 8px;
 }
 
 .keys-help {
