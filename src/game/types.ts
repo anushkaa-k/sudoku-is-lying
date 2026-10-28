@@ -11,15 +11,27 @@ export interface RuleCard {
   text: string;
 }
 
+export type Tier = 'easy' | 'medium' | 'hard';
+
+/**
+ * tutorial: played first, in pool order, by a brand-new player.
+ * live: served from its tier on the difficulty screen.
+ * draft: kept out of the game until it passes verification.
+ */
+export type PuzzleStatus = 'tutorial' | 'live' | 'draft';
+
 export interface Puzzle {
   id: string;
+  /** Shown next to the case tag, e.g. "Level 1: Tutorial". */
+  name: string;
   caseNumber: string;
-  /** Small label above the headline, e.g. "Level 1: Tutorial". */
-  label: string;
+  /** Draft label; adjust after playtesting. */
+  tier: Tier;
+  status: PuzzleStatus;
   givens: Grid;
   rules: RuleCard[];
   falseRuleId: RuleId;
   solution: Grid;
-  /** Shown only after a correct solve. */
-  explanation: string;
+  /** Shown only after a correct solve. Generated from the solution when omitted. */
+  explanation?: string;
 }

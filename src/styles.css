@@ -345,6 +345,89 @@ h1 {
   font-weight: 900;
 }
 
+/* Difficulty picker: same palette, page-teal buttons so they read on a panel */
+.picker-title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.tiers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.tier {
+  min-height: 72px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--cream);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-shadow: 0 4px 0 var(--bg-deep);
+}
+
+.tier:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--bg-deep);
+}
+
+.tier-name {
+  font-size: 19px;
+  font-weight: 900;
+}
+
+.tier-count {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.picker-note {
+  margin: 10px 0 0 !important;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--cream);
+}
+
+.picker-note:empty {
+  display: none;
+}
+
+.picker-sub {
+  margin: 16px 0 8px !important;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.feedback .picker {
+  margin-top: 14px;
+}
+
+.picker .key.wide {
+  background: var(--bg);
+  min-height: 48px;
+  font-size: 16px;
+}
+
+.back {
+  align-self: center;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 800;
+  padding: 8px 12px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .keys-help {
   margin: 0;
   text-align: center;

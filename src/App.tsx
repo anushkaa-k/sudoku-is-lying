@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { checkSubmission, type CheckResult } from './game/check';
-import { LEVELS } from './game/puzzles';
+import { explain } from './game/explain';
+import { POOL, TIERS, TUTORIALS, tierPuzzles } from './game/pool';
+import { loadSolved, saveSolved } from './game/progress';
 import { DIGITS, SIZE } from './game/solver';
-import type { Cell, Grid, Puzzle, RuleId } from './game/types';
+import type { Cell, Grid, Puzzle, RuleId, Tier } from './game/types';
 
 const TILTS = [-4, 2, -1];
 
@@ -29,28 +31,198 @@ function firstEmpty(g: Grid): [number, number] {
   return [0, 0];
 }
 
+const TIER_LABEL: Record<Tier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
+
+const byId = (id: string) => POOL.find((p) => p.id === id)!;
+
+type View = { kind: 'menu' } | { kind: 'play'; id: string };
+
 export default function App() {
-  const [level, setLevel] = useState(0);
-  const hasNext = level + 1 < LEVELS.length;
-  // Keyed by level so a new puzzle starts with fresh grid, suspect and result state.
+  const [solved, setSolved] = useState(loadSolved);
+  const tutorialDone = TUTORIALS.every((p) => solved.has(p.id));
+  // A new player starts on the first unsolved tutorial; after that, on the difficulty screen.
+  const [view, setView] = useState<View>(() => {
+    const next = TUTORIALS.find((p) => !solved.has(p.id));
+    return next ? { kind: 'play', id: next.id } : { kind: 'menu' };
+  });
+  // Counts screen changes so each new puzzle remounts fresh and later ones grab focus.
+  const [visit, setVisit] = useState(0);
+
+  const go = (v: View) => {
+    setView(v);
+    setVisit((n) => n + 1);
+  };
+
+  const markSolved = (id: string) =>
+    setSolved((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev).add(id);
+      saveSolved(next);
+      return next;
+    });
+
+  const unsolvedIn = (tier: Tier) => tierPuzzles(tier).filter((p) => !solved.has(p.id));
+
+  /** Starts a random unsolved puzzle from the tier; returns false when there is none. */
+  const startTier = (tier: Tier): boolean => {
+    const options = unsolvedIn(tier);
+    if (options.length === 0) return false;
+    go({ kind: 'play', id: options[Math.floor(Math.random() * options.length)].id });
+    return true;
+  };
+
+  const picker = (
+    <DifficultyPicker
+      unsolved={(t) => unsolvedIn(t).length}
+      total={(t) => tierPuzzles(t).length}
+      onPick={startTier}
+      onReplay={(id) => go({ kind: 'play', id })}
+    />
+  );
+
+  if (view.kind === 'menu') return <Menu key={visit} focusOnMount={visit > 0} picker={picker} />;
+
+  const puzzle = byId(view.id);
+  const tutorialIndex = TUTORIALS.indexOf(puzzle);
+  let winActions: ReactNode;
+  if (tutorialIndex >= 0 && tutorialIndex + 1 < TUTORIALS.length) {
+    const next = TUTORIALS[tutorialIndex + 1];
+    winActions = (
+      <button type="button" className="next" onClick={() => go({ kind: 'play', id: next.id })}>
+        Next puzzle
+      </button>
+    );
+  } else if (tutorialIndex >= 0) {
+    winActions = (
+      <>
+        <p className="more">Tutorial over. From here on you pick the case.</p>
+        {picker}
+      </>
+    );
+  } else if (unsolvedIn(puzzle.tier).length > 0) {
+    winActions = (
+      <button type="button" className="next" onClick={() => startTier(puzzle.tier)}>
+        New game
+      </button>
+    );
+  } else {
+    winActions = (
+      <>
+        <p className="more">
+          That was the last unsolved {TIER_LABEL[puzzle.tier]} case. No reruns; the rulebook has
+          standards.
+        </p>
+        {picker}
+      </>
+    );
+  }
+
   return (
     <Game
-      key={level}
-      puzzle={LEVELS[level]}
-      focusOnMount={level > 0}
-      onNext={hasNext ? () => setLevel(level + 1) : undefined}
+      key={visit}
+      puzzle={puzzle}
+      label={puzzle.status === 'tutorial' ? puzzle.name : `${TIER_LABEL[puzzle.tier]} · ${puzzle.name}`}
+      focusOnMount={visit > 0}
+      onSolved={() => markSolved(puzzle.id)}
+      winActions={winActions}
+      onMenu={tutorialDone ? () => go({ kind: 'menu' }) : undefined}
     />
+  );
+}
+
+function Header({ tag, label, children }: { tag: string; label?: string; children: ReactNode }) {
+  return (
+    <header>
+      <div className="tag-row">
+        <span className="tag">{tag}</span>
+        {label && <span className="level">{label}</span>}
+      </div>
+      <h1>
+        One rule is <span className="chip">full of it.</span>
+      </h1>
+      <p className="lede">{children}</p>
+    </header>
+  );
+}
+
+function Menu({ focusOnMount, picker }: { focusOnMount: boolean; picker: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!focusOnMount) return;
+    window.scrollTo(0, 0);
+    ref.current?.querySelector('button')?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <main className="app">
+      <Header tag="CASE FILES">
+        Every case below has three rules, <strong>exactly one of them lying</strong>, and exactly
+        one correct grid. We checked every single one. The rulebook is still sulking about it.
+      </Header>
+      <section ref={ref} className="panel" aria-label="Pick a case">
+        {picker}
+      </section>
+    </main>
+  );
+}
+
+interface PickerProps {
+  unsolved: (t: Tier) => number;
+  total: (t: Tier) => number;
+  /** Returns false when the tier has nothing left to serve. */
+  onPick: (t: Tier) => boolean;
+  onReplay: (id: string) => void;
+}
+
+function DifficultyPicker({ unsolved, total, onPick, onReplay }: PickerProps) {
+  const [note, setNote] = useState('');
+  const status = (t: Tier) =>
+    total(t) === 0 ? 'none yet' : unsolved(t) === 0 ? 'all solved' : `${unsolved(t)} unsolved`;
+  const pick = (t: Tier) => {
+    if (onPick(t)) return;
+    setNote(
+      total(t) === 0
+        ? `No ${TIER_LABEL[t]} cases yet. We’d rather ship nothing than ship a lie.`
+        : `You’ve solved every ${TIER_LABEL[t]} case we have. No reruns. Try another pile.`,
+    );
+  };
+  return (
+    <div className="picker">
+      <p className="picker-title">Pick a difficulty</p>
+      <div className="tiers">
+        {TIERS.map((t) => (
+          <button key={t} type="button" className="tier" onClick={() => pick(t)}>
+            <span className="tier-name">{TIER_LABEL[t]}</span>
+            <span className="tier-count">{status(t)}</span>
+          </button>
+        ))}
+      </div>
+      <p className="picker-note" role="status" aria-live="polite">
+        {note}
+      </p>
+      <p className="picker-sub">Replay the tutorial</p>
+      <div className="row-actions">
+        {TUTORIALS.map((p) => (
+          <button key={p.id} type="button" className="key wide" onClick={() => onReplay(p.id)}>
+            {p.name}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
 interface GameProps {
   puzzle: Puzzle;
+  label: string;
   focusOnMount: boolean;
-  /** Absent on the last level. */
-  onNext?: () => void;
+  onSolved: () => void;
+  /** Shown under the explanation once solved. */
+  winActions: ReactNode;
+  /** Back to the difficulty screen; absent while the tutorial is still in progress. */
+  onMenu?: () => void;
 }
 
-function Game({ puzzle, focusOnMount, onNext }: GameProps) {
+function Game({ puzzle, label, focusOnMount, onSolved, winActions, onMenu }: GameProps) {
   const isGiven = (r: number, c: number) => puzzle.givens[r][c] !== 0;
   const [grid, setGrid] = useState<Grid>(() => cloneGrid(puzzle.givens));
   const [sel, setSel] = useState<[number, number]>(() => firstEmpty(puzzle.givens));
@@ -58,7 +230,7 @@ function Game({ puzzle, focusOnMount, onNext }: GameProps) {
   const [result, setResult] = useState<CheckResult | null>(null);
   const tileRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // After "Next puzzle" the win panel is gone, so bring the player back to the top of the new case.
+  // After switching puzzles the win panel is gone, so bring the player back to the top of the new case.
   useEffect(() => {
     if (!focusOnMount) return;
     window.scrollTo(0, 0);
@@ -151,20 +323,11 @@ function Game({ puzzle, focusOnMount, onNext }: GameProps) {
 
   return (
     <main className="app">
-      <header>
-        <div className="tag-row">
-          <span className="tag">CASE #{puzzle.caseNumber}</span>
-          <span className="level">{puzzle.label}</span>
-        </div>
-        <h1>
-          One rule is <span className="chip">full of it.</span>
-        </h1>
-        <p className="lede">
-          Below are three rules. <strong>Exactly one of them is lying.</strong> The other two
-          are deadly serious. Fill the grid with 1–4, then name the liar. The fixed tiles never
-          lie, and neither do we. Only the rulebook does, and it’s very proud of itself.
-        </p>
-      </header>
+      <Header tag={`CASE #${puzzle.caseNumber}`} label={label}>
+        Below are three rules. <strong>Exactly one of them is lying.</strong> The other two are
+        deadly serious. Fill the grid with 1–4, then name the liar. The fixed tiles never lie, and
+        neither do we. Only the rulebook does, and it’s very proud of itself.
+      </Header>
 
       <section aria-label="Puzzle grid" className="panel">
         <div className="grid" role="group" aria-label="4 by 4 grid" onKeyDown={onGridKey}>
@@ -228,7 +391,15 @@ function Game({ puzzle, focusOnMount, onNext }: GameProps) {
         <p className="hint">Tap a card to mark your suspect. It’s your guess, not a clue.</p>
       </section>
 
-      <button type="button" className="check" onClick={() => setResult(checkSubmission(puzzle, grid, suspect))}>
+      <button
+        type="button"
+        className="check"
+        onClick={() => {
+          const r = checkSubmission(puzzle, grid, suspect);
+          setResult(r);
+          if (r === 'solved') onSolved();
+        }}
+      >
         Check
       </button>
 
@@ -236,20 +407,17 @@ function Game({ puzzle, focusOnMount, onNext }: GameProps) {
         {result && (
           <>
             <p className="feedback-title">{solved ? 'Case closed.' : FEEDBACK[result].title}</p>
-            <p>{solved ? puzzle.explanation : FEEDBACK[result].body}</p>
-            {solved &&
-              (onNext ? (
-                <button type="button" className="next" onClick={onNext}>
-                  Next puzzle
-                </button>
-              ) : (
-                <p className="more">
-                  More puzzles coming. The rulebook is busy drafting fresh lies.
-                </p>
-              ))}
+            <p>{solved ? explain(puzzle) : FEEDBACK[result].body}</p>
+            {solved && winActions}
           </>
         )}
       </div>
+
+      {onMenu && (
+        <button type="button" className="back" onClick={onMenu}>
+          ← Back to case files
+        </button>
+      )}
 
       <p className="keys-help">Keyboard: arrows move · 1–4 type · Backspace erases</p>
     </main>

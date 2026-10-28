@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "verify": "vite-node scripts/verify-levels.ts"
+    "verify": "vite-node scripts/verify-levels.ts",
+    "search": "vite-node scripts/search-puzzles.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

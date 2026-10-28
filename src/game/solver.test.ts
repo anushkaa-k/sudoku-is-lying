@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkSubmission } from './check';
-import { LEVELS, TUTORIAL } from './puzzles';
+import { explain } from './explain';
+import { POOL, TIERS, TUTORIAL, TUTORIALS, tierPuzzles } from './pool';
 import { countIfFalse, gridsEqual, ruleHolds, solveAll, RULE_IDS } from './solver';
 import type { Grid, RuleId } from './types';
 
@@ -13,18 +14,31 @@ describe('solver sanity', () => {
   });
 });
 
-const EXPECTED: Record<string, { liar: RuleId; counts: Record<RuleId, number> }> = {
-  'tutorial-001': { liar: 'A', counts: { A: 1, B: 0, C: 0 } },
-  'level-002': { liar: 'C', counts: { A: 0, B: 0, C: 1 } },
-};
+/** The two tutorials are pinned exactly; every other puzzle is checked generically below. */
+const TUTORIAL_EXPECTED: Record<string, RuleId> = { 'tutorial-001': 'A', 'level-002': 'C' };
 
-describe.each(LEVELS.map((p) => [p.label, p] as const))('%s: always-truthful contract', (_label, p) => {
-  const expected = EXPECTED[p.id];
-
-  it('has an expected-results entry and the right liar', () => {
-    expect(expected).toBeDefined();
-    expect(p.falseRuleId).toBe(expected.liar);
+describe('pool', () => {
+  it('starts with Level 1 then Level 2 as the tutorials, unchanged', () => {
+    expect(TUTORIALS.map((p) => p.id)).toEqual(['tutorial-001', 'level-002']);
+    for (const p of TUTORIALS) expect(p.falseRuleId).toBe(TUTORIAL_EXPECTED[p.id]);
   });
+
+  it('has unique ids and case numbers', () => {
+    expect(new Set(POOL.map((p) => p.id)).size).toBe(POOL.length);
+    expect(new Set(POOL.map((p) => p.caseNumber)).size).toBe(POOL.length);
+  });
+
+  it('never serves tutorials or drafts from a tier', () => {
+    for (const t of TIERS) for (const p of tierPuzzles(t)) expect(p.status).toBe('live');
+  });
+
+  it('has at most 3 new puzzles per tier', () => {
+    for (const t of TIERS) expect(tierPuzzles(t).length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe.each(POOL.map((p) => [p.name, p] as const))('%s: always-truthful contract', (_name, p) => {
+  const expected = Object.fromEntries(RULE_IDS.map((id) => [id, id === p.falseRuleId ? 1 : 0]));
 
   it('uses only digits 0-4 in givens and 1-4 in the solution', () => {
     expect(p.givens.flat().every((v) => v >= 0 && v <= 4)).toBe(true);
@@ -44,7 +58,7 @@ describe.each(LEVELS.map((p) => [p.label, p] as const))('%s: always-truthful con
   });
 
   it.each(RULE_IDS)('if %s is false (other two enforced): expected completion count', (id) => {
-    expect(countIfFalse(p.givens, id)).toHaveLength(expected.counts[id]);
+    expect(countIfFalse(p.givens, id)).toHaveLength(expected[id]);
   });
 
   it('standard Sudoku (A+B+C enforced): 0 completions', () => {
@@ -60,8 +74,10 @@ describe.each(LEVELS.map((p) => [p.label, p] as const))('%s: always-truthful con
     for (const id of RULE_IDS) expect(ruleHolds(p.solution, id)).toBe(id !== p.falseRuleId);
   });
 
-  it('explanation names the liar', () => {
-    expect(p.explanation).toContain(`Rule ${p.falseRuleId}`);
+  it('win text names the liar and no other rule as lying', () => {
+    const text = explain(p);
+    expect(text).toContain(`Rule ${p.falseRuleId}`);
+    for (const id of RULE_IDS) if (id !== p.falseRuleId) expect(text).not.toContain(`Rule ${id} lied`);
   });
 });
 
