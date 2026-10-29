@@ -183,7 +183,7 @@ h1 {
   background: var(--tile);
   color: var(--cream);
   font-size: clamp(28px, 9vw, 40px);
-  font-weight: 900;
+  font-weight: 500; /* medium; shows as regular where the font has no medium face */
   display: grid;
   place-items: center;
   padding: 0;
