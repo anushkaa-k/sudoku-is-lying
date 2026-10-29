@@ -8,6 +8,16 @@
   --yellow: #ffd23f;
   --tangerine: #ff7a1a;
   --ink: #0e3b3d;
+  /* --cream as RGB channels, so fixed tiles can use the same beige at partial opacity. */
+  --cream-rgb: 255 244 224;
+
+  /* Board tuning knobs */
+  --tile-bg-opacity: 0.7; /* fixed-tile beige: 1 = solid, 0 = clear */
+  --tile-radius: 8px;
+  --cell-gap: 3px; /* thin line between cells */
+  --box-gap: 6px; /* thick divider between boxes */
+  --box-line: var(--bg-deep); /* colour of the box dividers */
+  --key-radius: 8px; /* number pad and tab corners */
   color-scheme: dark;
 }
 
@@ -117,23 +127,53 @@ h1 {
   font-weight: 900;
 }
 
-/* Grid */
+.howto {
+  margin-top: 6px;
+  min-height: 32px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--cream);
+  font-size: 15px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.howto::after {
+  content: '▾';
+  display: inline-block;
+  margin-left: 6px;
+  transition: transform 120ms ease;
+}
+
+.howto[aria-expanded='true']::after {
+  transform: rotate(180deg);
+}
+
+/* Grid: thin cell lines, thicker dividers between boxes, flat cells */
 .panel {
+  position: relative;
   background: var(--panel);
-  border-radius: 22px;
-  padding: 14px;
+  border-radius: 16px;
+  padding: 8px;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--box-gap);
+  padding: var(--box-gap);
+  background: var(--box-line);
+  border-radius: calc(var(--tile-radius) + var(--box-gap));
 }
 
 .box {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px;
+  gap: var(--cell-gap);
+  background: var(--panel);
+  border-radius: var(--tile-radius);
 }
 
 .tile {
@@ -141,7 +181,7 @@ h1 {
   min-width: 0;
   aspect-ratio: 1;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--tile-radius);
   background: var(--tile);
   color: var(--cream);
   font-size: clamp(28px, 9vw, 40px);
@@ -149,56 +189,116 @@ h1 {
   display: grid;
   place-items: center;
   padding: 0;
-  transition: transform 80ms ease;
 }
 
+/* Same beige as before, translucent so the board shows through; the digit stays solid. */
 .tile.given {
-  background: var(--cream);
+  background: rgb(var(--cream-rgb) / var(--tile-bg-opacity));
   color: var(--ink);
 }
 
 .tile.selected {
   outline: 3px solid var(--yellow);
   outline-offset: -3px;
-  transform: scale(1.04);
 }
 
 .tile.given.selected {
   outline-color: var(--tangerine);
 }
 
-/* Larger boards: same look, tighter spacing so 9x9 still fits a phone. 4x4 is untouched. */
-.panel.size-6 .grid {
-  gap: 9px;
+/* Larger boards: same look, tighter spacing so 9x9 still fits a phone. */
+.panel.size-6 {
+  --tile-radius: 6px;
+  --cell-gap: 2px;
+  --box-gap: 5px;
 }
 
 .panel.size-6 .tile {
-  border-radius: 9px;
   font-size: clamp(22px, 7vw, 30px);
 }
 
 .panel.size-9 {
-  /* Borrow half the page gutter so each 9x9 cell is ~36px wide on a 375px phone. */
+  --tile-radius: 4px;
+  --cell-gap: 2px;
+  --box-gap: 4px;
+  /* Borrow half the page gutter so each 9x9 cell stays ~34px wide on a 375px phone. */
   margin: 0 -8px;
-  padding: 6px;
-  border-radius: 16px;
-}
-
-.panel.size-9 .grid {
-  gap: 5px;
-}
-
-.panel.size-9 .box {
-  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
 }
 
 .panel.size-9 .tile {
-  border-radius: 6px;
   font-size: clamp(17px, 5.4vw, 24px);
 }
 
-.panel.size-9 .tile.selected {
-  transform: none;
+/* Paused: hide the board itself, not just dim it. */
+.panel.paused .grid {
+  visibility: hidden;
+}
+
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  background: var(--panel);
+  border-radius: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.pause-overlay p {
+  margin: 0;
+}
+
+.pause-title {
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--cream);
+}
+
+.pause-overlay .key.wide {
+  min-width: 160px;
+  margin-top: 6px;
+  background: var(--bg);
+  color: var(--cream);
+}
+
+/* Timer: small and quiet, just above the board */
+.timer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: -10px;
+}
+
+.timer {
+  font-size: 17px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.timer-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--key-radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.timer-btn[aria-pressed='true'] {
+  color: var(--cream);
 }
 
 /* Keypad */
@@ -223,11 +323,11 @@ h1 {
 .key {
   min-height: 52px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--key-radius);
   background: var(--panel);
   color: var(--cream);
-  font-size: 26px;
-  font-weight: 900;
+  font-size: 24px;
+  font-weight: 800;
 }
 
 .keypad.size-6 {
@@ -239,8 +339,7 @@ h1 {
 }
 
 .keypad.size-9 .key {
-  font-size: 22px;
-  border-radius: 10px;
+  font-size: 21px;
 }
 
 .key.wide {
@@ -250,7 +349,7 @@ h1 {
 }
 
 .key:not(:disabled):active {
-  transform: translateY(1px);
+  background: var(--tile);
 }
 
 /* Rule cards — all identical in colour so none looks more trustworthy */
@@ -392,7 +491,7 @@ h1 {
   font-weight: 900;
 }
 
-/* Difficulty selector above the grid: same palette as the keypad, selected = yellow outline */
+/* Difficulty selector: one compact tab row; the selected tab gets a yellow underline */
 .modes-wrap {
   display: flex;
   flex-direction: column;
@@ -402,36 +501,40 @@ h1 {
 .modes {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-deep);
+  border-radius: calc(var(--key-radius) + 3px);
 }
 
 .mode {
-  min-height: 56px;
+  min-height: 44px;
   border: 0;
-  border-radius: 14px;
-  background: var(--panel);
-  color: var(--cream);
+  border-radius: var(--key-radius);
+  background: transparent;
+  color: var(--muted);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 6px 2px;
+  gap: 1px;
+  padding: 4px 2px;
 }
 
 .mode[aria-pressed='true'] {
-  outline: 3px solid var(--yellow);
-  outline-offset: -3px;
+  background: var(--panel);
+  color: var(--cream);
+  box-shadow: inset 0 -3px 0 var(--yellow);
 }
 
 .mode-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
 }
 
 .mode-count {
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
   color: var(--muted);
 }
 

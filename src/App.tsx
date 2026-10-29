@@ -31,6 +31,32 @@ function firstEmpty(g: Grid): [number, number] {
   return [0, 0];
 }
 
+/** mm:ss, or h:mm:ss past the hour. */
+function formatTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${String(m).padStart(2, '0')}:${sec}`;
+}
+
+/** Elapsed milliseconds, accumulating only while `running`. */
+function useStopwatch(running: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  const banked = useRef(0);
+  useEffect(() => {
+    if (!running) return;
+    const since = performance.now();
+    const id = setInterval(() => setElapsed(banked.current + performance.now() - since), 250);
+    return () => {
+      clearInterval(id);
+      banked.current += performance.now() - since;
+      setElapsed(banked.current);
+    };
+  }, [running]);
+  return elapsed;
+}
+
 const TIER_LABEL: Record<Tier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 const SUGGESTION_FLAG = 'tutorial-suggestion-dismissed';
 
@@ -148,11 +174,19 @@ export default function App() {
 
   return (
     <main className="app">
-      <Header tag={puzzle ? `CASE #${puzzle.caseNumber}` : 'CASE FILES'} label={label}>
-        Below are three rules. <strong>Exactly one of them is lying.</strong> The other two are
-        deadly serious. Fill the grid with 1–{puzzle?.size ?? TIER_SIZE[mode === 'tutorial' ? 'easy' : mode]}, then name the liar. The fixed tiles never lie, and
-        neither do we. Only the rulebook does, and it’s very proud of itself.
-      </Header>
+      <Header
+        tag={puzzle ? `CASE #${puzzle.caseNumber}` : 'CASE FILES'}
+        label={label}
+        intro="Below are three rules."
+        rest={
+          <>
+            <strong>Exactly one of them is lying.</strong> The other two are deadly serious. Fill the
+            grid with 1–{puzzle?.size ?? TIER_SIZE[mode === 'tutorial' ? 'easy' : mode]}, then name the
+            liar. The fixed tiles never lie, and neither do we. Only the rulebook does, and it’s very
+            proud of itself.
+          </>
+        }
+      />
 
       {suggest && (
         <section className="suggest" aria-label="Tutorial suggestion">
@@ -209,7 +243,17 @@ export default function App() {
   );
 }
 
-function Header({ tag, label, children }: { tag: string; label?: string; children: ReactNode }) {
+interface HeaderProps {
+  tag: string;
+  label?: string;
+  /** First sentence of the intro, always shown. */
+  intro: string;
+  /** The rest of the intro, shown inline when "How to play" is open. */
+  rest: ReactNode;
+}
+
+function Header({ tag, label, intro, rest }: HeaderProps) {
+  const [open, setOpen] = useState(false);
   return (
     <header>
       <div className="tag-row">
@@ -219,7 +263,19 @@ function Header({ tag, label, children }: { tag: string; label?: string; childre
       <h1>
         One rule is <span className="chip">full of it.</span>
       </h1>
-      <p className="lede">{children}</p>
+      <p className="lede" id="how-to-play">
+        {intro}
+        {open && <> {rest}</>}
+      </p>
+      <button
+        type="button"
+        className="howto"
+        aria-expanded={open}
+        aria-controls="how-to-play"
+        onClick={() => setOpen((o) => !o)}
+      >
+        How to play
+      </button>
     </header>
   );
 }
@@ -351,6 +407,20 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
   }, []);
 
   const solved = result === 'solved';
+  // Stopwatch: counts up from 00:00, pauses on request (or when the tab is hidden), stops on a solve.
+  // The Game remounts for every new puzzle, so it also resets then.
+  const [paused, setPaused] = useState(false);
+  const elapsed = useStopwatch(!paused && !solved);
+  const resumeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onHide = () => document.hidden && setPaused(true);
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, []);
+  useEffect(() => {
+    if (paused) resumeRef.current?.focus();
+  }, [paused]);
+  const locked = solved || paused;
   const touched = suspect !== null || grid.some((row, r) => row.some((v, c) => v !== puzzle.givens[r][c]));
   useEffect(() => {
     onDirty(touched && !solved);
@@ -359,7 +429,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
   const selGiven = isGiven(sr, sc);
 
   const setCell = (r: number, c: number, v: Cell) => {
-    if (solved || isGiven(r, c)) return;
+    if (locked || isGiven(r, c)) return;
     setGrid((g) => {
       const next = cloneGrid(g);
       next[r][c] = v;
@@ -376,6 +446,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
   };
 
   const onGridKey = (e: KeyboardEvent) => {
+    if (paused) return;
     const k = e.key;
     if (k === 'ArrowUp') move(sr - 1, sc);
     else if (k === 'ArrowDown') move(sr + 1, sc);
@@ -394,7 +465,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
   };
 
   const accuse = (id: RuleId) => {
-    if (solved) return;
+    if (locked) return;
     setSuspect((s) => (s === id ? null : id));
     setResult(null);
   };
@@ -410,7 +481,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
         ref={(el) => (tileRefs.current[r * size + c] = el)}
         type="button"
         className={`tile${given ? ' given' : ''}${selected ? ' selected' : ''}`}
-        tabIndex={selected ? 0 : -1}
+        tabIndex={selected && !paused ? 0 : -1}
         aria-label={label}
         aria-pressed={selected}
         onClick={() => move(r, c)}
@@ -432,16 +503,37 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
 
   return (
     <>
-      <section aria-label="Puzzle grid" className={`panel size-${size}`}>
+      <div className="timer-row">
+        <span className="timer" role="timer" aria-label={`Time ${formatTime(elapsed)}${paused ? ', paused' : ''}`}>
+          {formatTime(elapsed)}
+        </span>
+        {!solved && (
+          <button type="button" className="timer-btn" aria-pressed={paused} onClick={() => setPaused((p) => !p)}>
+            {paused ? 'Resume' : 'Pause'}
+          </button>
+        )}
+      </div>
+
+      <section aria-label="Puzzle grid" className={`panel size-${size}${paused ? ' paused' : ''}`}>
         <div
           className="grid"
           role="group"
           aria-label={`${size} by ${size} grid`}
+          aria-hidden={paused}
           style={{ gridTemplateColumns: `repeat(${size / box.cols}, minmax(0, 1fr))` }}
           onKeyDown={onGridKey}
         >
           {boxes}
         </div>
+        {paused && (
+          <div className="pause-overlay">
+            <p className="pause-title">Paused</p>
+            <p>The board stays hidden while the clock is stopped.</p>
+            <button ref={resumeRef} type="button" className="key wide" onClick={() => setPaused(false)}>
+              Resume
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="controls" aria-label="Number pad">
@@ -451,7 +543,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
               key={d}
               type="button"
               className="key"
-              disabled={solved || selGiven}
+              disabled={locked || selGiven}
               onPointerDown={keepFocus}
               onClick={() => setCell(sr, sc, d)}
               aria-label={`Enter ${d}`}
@@ -464,13 +556,13 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
           <button
             type="button"
             className="key wide"
-            disabled={solved || selGiven}
+            disabled={locked || selGiven}
             onPointerDown={keepFocus}
             onClick={() => setCell(sr, sc, 0)}
           >
             Erase
           </button>
-          <button type="button" className="key wide" onClick={reset}>
+          <button type="button" className="key wide" disabled={paused} onClick={reset}>
             Reset
           </button>
         </div>
@@ -488,6 +580,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
               className={`card${suspect === rule.id ? ' suspect' : ''}`}
               style={{ ['--tilt' as string]: `${TILTS[i % TILTS.length]}deg` }}
               aria-pressed={suspect === rule.id}
+              disabled={paused}
               aria-label={`Rule ${rule.id}: ${rule.text}${suspect === rule.id ? ' (your suspect)' : ''}`}
               onClick={() => accuse(rule.id)}
             >
@@ -503,6 +596,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
       <button
         type="button"
         className="check"
+        disabled={paused}
         onClick={() => {
           const r = checkSubmission(puzzle, grid, suspect);
           setResult(r);
