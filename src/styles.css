@@ -11,7 +11,7 @@
 
   /* Board tuning knobs */
   --given-border-width: 1.5px; /* beige outline on fixed tiles */
-  --tile-font-scale: 0.85; /* grid digit size relative to the original (1 = original) */
+  --tile-font-scale: 0.765; /* grid digit size relative to the original (1 = original) */
   --tile-radius: 8px;
   --cell-gap: 3px; /* thin line between cells */
   --box-gap: 6px; /* thick divider between boxes */
