@@ -11,6 +11,7 @@
 
   /* Board tuning knobs */
   --given-border-width: 1.5px; /* beige outline on fixed tiles */
+  --tile-font-scale: 0.85; /* grid digit size relative to the original (1 = original) */
   --tile-radius: 8px;
   --cell-gap: 3px; /* thin line between cells */
   --box-gap: 6px; /* thick divider between boxes */
@@ -182,7 +183,7 @@ h1 {
   border-radius: var(--tile-radius);
   background: var(--tile);
   color: var(--cream);
-  font-size: clamp(28px, 9vw, 40px);
+  font-size: calc(clamp(28px, 9vw, 40px) * var(--tile-font-scale));
   font-weight: 500; /* medium; shows as regular where the font has no medium face */
   display: grid;
   place-items: center;
@@ -213,7 +214,7 @@ h1 {
 }
 
 .panel.size-6 .tile {
-  font-size: clamp(22px, 7vw, 30px);
+  font-size: calc(clamp(22px, 7vw, 30px) * var(--tile-font-scale));
 }
 
 .panel.size-9 {
@@ -227,7 +228,7 @@ h1 {
 }
 
 .panel.size-9 .tile {
-  font-size: clamp(17px, 5.4vw, 24px);
+  font-size: calc(clamp(17px, 5.4vw, 24px) * var(--tile-font-scale));
 }
 
 /* Paused: hide the board itself, not just dim it. */
