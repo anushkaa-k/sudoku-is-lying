@@ -576,6 +576,11 @@ h1 {
   outline: 3px solid var(--tangerine);
 }
 
+.suggest .key.wide.skip {
+  width: 100%;
+  color: var(--cream);
+}
+
 .confirm-title,
 .exhausted-title {
   font-size: 20px;

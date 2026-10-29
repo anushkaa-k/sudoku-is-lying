@@ -3,7 +3,7 @@ import { countSolutions, DEFAULT_BUDGET, gate, holds, logicSolve, type Geometry 
 import { checkSubmission } from './check';
 import { explain } from './explain';
 import { POOL, TIER_SIZE, TIERS, TUTORIAL, TUTORIALS, tierPuzzles } from './pool';
-import { fingerprint, loadSolved, recordKey, saveSolved } from './progress';
+import { fingerprint, loadSolved, recordKey, saveFlag, saveSolved, TUTORIAL_DONE_FLAG, tutorialSettled } from './progress';
 import { digitsFor, groupsFor, ruleHolds, RULE_IDS } from './solver';
 import type { Grid, Puzzle, RuleId } from './types';
 
@@ -213,6 +213,40 @@ describe('saved progress', () => {
     expect(fingerprint(changed)).not.toBe(fingerprint(p));
     saveSolved(new Set([recordKey(p)]));
     expect(loadSolved(POOL).has(recordKey(changed))).toBe(false);
+  });
+
+  describe('first-visit tutorial', () => {
+    const tutorialKeys = TUTORIALS.map(recordKey);
+    const live = POOL.find((p) => p.status === 'live')!;
+
+    it('opens for a brand-new device', () => {
+      expect(tutorialSettled(loadSolved(POOL), tutorialKeys)).toBe(false);
+    });
+
+    it('still opens mid-tutorial (only tutorial levels solved)', () => {
+      saveSolved(new Set([tutorialKeys[0]]));
+      expect(tutorialSettled(loadSolved(POOL), tutorialKeys)).toBe(false);
+    });
+
+    it('stops once finished or skipped', () => {
+      saveFlag(TUTORIAL_DONE_FLAG);
+      expect(tutorialSettled(loadSolved(POOL), tutorialKeys)).toBe(true);
+    });
+
+    it('never opens for an existing player with progress', () => {
+      saveSolved(new Set([recordKey(live)]));
+      expect(tutorialSettled(loadSolved(POOL), tutorialKeys)).toBe(true);
+    });
+
+    it('never opens for an older player who dismissed the old suggestion', () => {
+      store.set('lying-sudoku:tutorial-suggestion-dismissed', '1');
+      expect(tutorialSettled(loadSolved(POOL), tutorialKeys)).toBe(true);
+    });
+
+    it('never opens for a v1 player (4x4 progress from before)', () => {
+      store.set('lying-sudoku:solved:v1', JSON.stringify(['case-003']));
+      expect(tutorialSettled(loadSolved(POOL), tutorialKeys)).toBe(true);
+    });
   });
 
   it('round-trips v2 records', () => {

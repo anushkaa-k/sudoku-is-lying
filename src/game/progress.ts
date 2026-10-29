@@ -75,3 +75,20 @@ export function saveFlag(name: string): void {
     // Storage blocked: the flag just won't survive a refresh.
   }
 }
+
+/** Set once this device has finished or skipped the tutorial, so it stops opening by itself. */
+export const TUTORIAL_DONE_FLAG = 'tutorial-done';
+/** Set by earlier versions when the tutorial suggestion was dismissed or any puzzle was solved. */
+const LEGACY_SUGGESTION_FLAG = 'tutorial-suggestion-dismissed';
+
+/**
+ * Whether the tutorial should no longer open automatically: it was finished or skipped,
+ * or this device already has progress beyond the tutorial (an existing player).
+ */
+export function tutorialSettled(solved: Set<string>, tutorialKeys: string[]): boolean {
+  return (
+    loadFlag(TUTORIAL_DONE_FLAG) ||
+    loadFlag(LEGACY_SUGGESTION_FLAG) ||
+    [...solved].some((k) => !tutorialKeys.includes(k))
+  );
+}

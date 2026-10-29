@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { checkSubmission, type CheckResult } from './game/check';
 import { explain } from './game/explain';
 import { POOL, TIER_SIZE, TIERS, TUTORIALS, tierPuzzles } from './game/pool';
-import { loadFlag, loadSolved, recordKey, saveFlag, saveSolved } from './game/progress';
+import { loadSolved, recordKey, saveFlag, saveSolved, TUTORIAL_DONE_FLAG, tutorialSettled } from './game/progress';
 import { digitsFor, groupsFor } from './game/solver';
 import type { Cell, Grid, Puzzle, RuleId, Tier } from './game/types';
 
@@ -58,7 +58,6 @@ function useStopwatch(running: boolean): number {
 }
 
 const TIER_LABEL: Record<Tier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
-const SUGGESTION_FLAG = 'tutorial-suggestion-dismissed';
 
 const byId = (id: string) => POOL.find((p) => p.id === id)!;
 
@@ -86,16 +85,28 @@ export default function App() {
   };
   const tutorialView = (id: string): View => ({ kind: 'play', mode: 'tutorial', id, replay: isSolved(byId(id)) });
 
-  // Open straight on a playable puzzle: the first tier with anything unsolved (Easy if all are done).
-  const [view, setView] = useState<View>(() => deal(TIERS.find((t) => unsolvedIn(t).length > 0) ?? 'easy'));
+  const dealFirstOpenTier = () => deal(TIERS.find((t) => unsolvedIn(t).length > 0) ?? 'easy');
+  // A first visit opens the tutorial (skippable); after it is finished or skipped, or for an
+  // existing player, open straight on a playable puzzle from the first tier with anything unsolved.
+  const [autoTutorial, setAutoTutorial] = useState(() => !tutorialSettled(solved, TUTORIALS.map(recordKey)));
+  const [view, setView] = useState<View>(() =>
+    autoTutorial ? tutorialView((TUTORIALS.find((p) => !isSolved(p)) ?? TUTORIALS[0]).id) : dealFirstOpenTier(),
+  );
   // Bumped on every switch so the new puzzle remounts fresh; later mounts also grab focus.
   const [visit, setVisit] = useState(0);
   // Whether the board holds unsaved work (entries or a suspect, not yet solved).
   const dirty = useRef(false);
   const [pending, setPending] = useState<View | null>(null);
-  const [suggest, setSuggest] = useState(() => solved.size === 0 && !loadFlag(SUGGESTION_FLAG));
+
+  /** Remember on this device that the tutorial was finished or skipped. */
+  const settleTutorial = () => {
+    setAutoTutorial(false);
+    saveFlag(TUTORIAL_DONE_FLAG);
+  };
 
   const show = (v: View) => {
+    // Leaving the first-visit tutorial for a real case (Skip or a difficulty tab) counts as skipping it.
+    if (autoTutorial && !(v.kind === 'play' && v.mode === 'tutorial')) settleTutorial();
     dirty.current = false;
     setPending(null);
     setView(v);
@@ -104,13 +115,8 @@ export default function App() {
   /** Never silently discard an active game: ask first. */
   const switchTo = (v: View) => (dirty.current && view.kind === 'play' ? setPending(v) : show(v));
 
-  const dismissSuggestion = () => {
-    setSuggest(false);
-    saveFlag(SUGGESTION_FLAG);
-  };
-
   const markSolved = (p: Puzzle) => {
-    dismissSuggestion();
+    if (p === TUTORIALS[TUTORIALS.length - 1]) settleTutorial();
     const key = recordKey(p);
     setSolved((prev) => {
       if (prev.has(key)) return prev;
@@ -188,24 +194,12 @@ export default function App() {
         }
       />
 
-      {suggest && (
-        <section className="suggest" aria-label="Tutorial suggestion">
+      {autoTutorial && mode === 'tutorial' && (
+        <section className="suggest" aria-label="Tutorial">
           <p>New here? The two-case tutorial shows how a lying rule works. Entirely optional.</p>
-          <div className="row-actions">
-            <button
-              type="button"
-              className="key wide"
-              onClick={() => {
-                dismissSuggestion();
-                pickMode('tutorial');
-              }}
-            >
-              Try the tutorial
-            </button>
-            <button type="button" className="key wide" onClick={dismissSuggestion}>
-              Skip
-            </button>
-          </div>
+          <button type="button" className="key wide skip" onClick={() => switchTo(dealFirstOpenTier())}>
+            Skip tutorial
+          </button>
         </section>
       )}
 
