@@ -5,6 +5,7 @@ import { POOL, TIER_SIZE, TIERS, TUTORIALS, tierPuzzles } from './game/pool';
 import { loadSolved, recordKey, saveFlag, saveSolved, TUTORIAL_DONE_FLAG, tutorialSettled } from './game/progress';
 import { digitsFor, groupsFor } from './game/solver';
 import type { Cell, Grid, Puzzle, RuleId, Tier } from './game/types';
+import { Walkthrough, type TourStep } from './Walkthrough';
 
 const TILTS = [-4, 2, -1];
 
@@ -57,6 +58,20 @@ function useStopwatch(running: boolean): number {
   return elapsed;
 }
 
+/**
+ * The guided walkthrough, shown over the real tutorial screen. Wording reuses the game's own
+ * lines; it explains the idea and the controls without hinting at any answer.
+ */
+const tourSteps = (size: number): TourStep[] => [
+  { target: 'intro', text: <>One rule is full of it. Below are three rules. <strong>Exactly one of them is lying.</strong></> },
+  { target: 'rules', text: <>These are the three rules. One is bluffing; the other two are deadly serious.</> },
+  { target: 'board', text: <>Fill the grid with 1–{size}. The fixed tiles never lie, and neither do we.</> },
+  { target: 'keypad', text: <>Tap a tile, then a number. Erase clears a tile; Reset starts the case over.</> },
+  { target: 'rules', text: <>Which one is bluffing? Tap a card to mark your suspect. It’s your guess, not a clue.</> },
+  { target: 'check', text: <>Grid full and liar named? Press Check. It tells you if you’re right, never which rule lies.</> },
+  { target: 'tabs', text: <>Pick Easy, Medium or Hard for a real case. Tutorial replays this walkthrough.</> },
+];
+
 const TIER_LABEL: Record<Tier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 
 const byId = (id: string) => POOL.find((p) => p.id === id)!;
@@ -86,11 +101,14 @@ export default function App() {
   const tutorialView = (id: string): View => ({ kind: 'play', mode: 'tutorial', id, replay: isSolved(byId(id)) });
 
   const dealFirstOpenTier = () => deal(TIERS.find((t) => unsolvedIn(t).length > 0) ?? 'easy');
-  // A first visit opens the tutorial (skippable); after it is finished or skipped, or for an
-  // existing player, open straight on a playable puzzle from the first tier with anything unsolved.
-  const [autoTutorial, setAutoTutorial] = useState(() => !tutorialSettled(solved, TUTORIALS.map(recordKey)));
+  // A first visit opens the guided walkthrough over the tutorial puzzle. Once it is finished or
+  // skipped, or for an existing player, open straight on a puzzle from the first open tier.
+  // 'first' = automatic first-visit walkthrough, 'replay' = started from the Tutorial tab.
+  const [tour, setTour] = useState<'first' | 'replay' | null>(() =>
+    tutorialSettled(solved, TUTORIALS.map(recordKey)) ? null : 'first',
+  );
   const [view, setView] = useState<View>(() =>
-    autoTutorial ? tutorialView((TUTORIALS.find((p) => !isSolved(p)) ?? TUTORIALS[0]).id) : dealFirstOpenTier(),
+    tour ? tutorialView((TUTORIALS.find((p) => !isSolved(p)) ?? TUTORIALS[0]).id) : dealFirstOpenTier(),
   );
   // Bumped on every switch so the new puzzle remounts fresh; later mounts also grab focus.
   const [visit, setVisit] = useState(0);
@@ -98,15 +116,20 @@ export default function App() {
   const dirty = useRef(false);
   const [pending, setPending] = useState<View | null>(null);
 
-  /** Remember on this device that the tutorial was finished or skipped. */
-  const settleTutorial = () => {
-    setAutoTutorial(false);
-    saveFlag(TUTORIAL_DONE_FLAG);
+  /** Remember on this device that the tutorial was finished or skipped. Touches nothing else. */
+  const settleTutorial = () => saveFlag(TUTORIAL_DONE_FLAG);
+
+  const endTour = (skipped: boolean) => {
+    if (tour === 'first') {
+      settleTutorial();
+      // Skipping the first-visit walkthrough skips the tutorial too; finishing it leads to the puzzle.
+      // The board is untouched while the walkthrough is open, so nothing is discarded.
+      if (skipped) show(dealFirstOpenTier());
+    }
+    setTour(null);
   };
 
   const show = (v: View) => {
-    // Leaving the first-visit tutorial for a real case (Skip or a difficulty tab) counts as skipping it.
-    if (autoTutorial && !(v.kind === 'play' && v.mode === 'tutorial')) settleTutorial();
     dirty.current = false;
     setPending(null);
     setView(v);
@@ -194,15 +217,6 @@ export default function App() {
         }
       />
 
-      {autoTutorial && mode === 'tutorial' && (
-        <section className="suggest" aria-label="Tutorial">
-          <p>New here? The two-case tutorial shows how a lying rule works. Entirely optional.</p>
-          <button type="button" className="key wide skip" onClick={() => switchTo(dealFirstOpenTier())}>
-            Skip tutorial
-          </button>
-        </section>
-      )}
-
       <ModeSelector
         mode={mode}
         unsolved={(t) => unsolvedIn(t).length}
@@ -210,6 +224,7 @@ export default function App() {
         onPick={pickMode}
         tutorialId={view.kind === 'play' && view.mode === 'tutorial' ? view.id : undefined}
         onTutorialLevel={(id) => view.kind === 'play' && view.id !== id && switchTo(tutorialView(id))}
+        onReplayTour={() => setTour('replay')}
       />
 
       {pending && <ConfirmAbandon onKeep={() => setPending(null)} onAbandon={() => show(pending)} />}
@@ -231,7 +246,11 @@ export default function App() {
           }}
           onSolved={() => markSolved(puzzle!)}
           winActions={winActions}
+          frozen={tour !== null}
         />
+      )}
+      {tour && puzzle && (
+        <Walkthrough steps={tourSteps(puzzle.size)} onDone={() => endTour(false)} onSkip={() => endTour(true)} />
       )}
     </main>
   );
@@ -254,7 +273,7 @@ function Header({ tag, label, intro, rest }: HeaderProps) {
         <span className="tag">{tag}</span>
         {label && <span className="level">{label}</span>}
       </div>
-      <h1>
+      <h1 data-tour="intro">
         One rule is <span className="chip">full of it.</span>
       </h1>
       <p className="lede" id="how-to-play">
@@ -282,14 +301,15 @@ interface ModeSelectorProps {
   /** Set while a tutorial level is on the board. */
   tutorialId?: string;
   onTutorialLevel: (id: string) => void;
+  onReplayTour: () => void;
 }
 
-function ModeSelector({ mode, unsolved, total, onPick, tutorialId, onTutorialLevel }: ModeSelectorProps) {
+function ModeSelector({ mode, unsolved, total, onPick, tutorialId, onTutorialLevel, onReplayTour }: ModeSelectorProps) {
   const count = (t: Tier) =>
     total(t) === 0 ? 'none yet' : unsolved(t) === 0 ? 'all solved' : `${unsolved(t)} unsolved`;
   return (
     <nav aria-label="Difficulty" className="modes-wrap">
-      <div className="modes">
+      <div className="modes" data-tour="tabs">
         {TIERS.map((t) => (
           <button key={t} type="button" className="mode" aria-pressed={mode === t} onClick={() => onPick(t)}>
             <span className="mode-name">{TIER_LABEL[t]}</span>
@@ -315,6 +335,11 @@ function ModeSelector({ mode, unsolved, total, onPick, tutorialId, onTutorialLev
             </button>
           ))}
         </div>
+      )}
+      {mode === 'tutorial' && (
+        <button type="button" className="tour-replay" onClick={onReplayTour}>
+          Replay the walkthrough
+        </button>
       )}
     </nav>
   );
@@ -381,9 +406,11 @@ interface GameProps {
   onSolved: () => void;
   /** Shown under the explanation once solved. */
   winActions: ReactNode;
+  /** True while the walkthrough is open: the clock holds still. */
+  frozen: boolean;
 }
 
-function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps) {
+function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions, frozen }: GameProps) {
   const isGiven = (r: number, c: number) => puzzle.givens[r][c] !== 0;
   const [grid, setGrid] = useState<Grid>(() => cloneGrid(puzzle.givens));
   const [sel, setSel] = useState<[number, number]>(() => firstEmpty(puzzle.givens));
@@ -404,7 +431,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
   // Stopwatch: counts up from 00:00, pauses on request (or when the tab is hidden), stops on a solve.
   // The Game remounts for every new puzzle, so it also resets then.
   const [paused, setPaused] = useState(false);
-  const elapsed = useStopwatch(!paused && !solved);
+  const elapsed = useStopwatch(!paused && !solved && !frozen);
   const resumeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const onHide = () => document.hidden && setPaused(true);
@@ -508,7 +535,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
         )}
       </div>
 
-      <section aria-label="Puzzle grid" className={`panel size-${size}${paused ? ' paused' : ''}`}>
+      <section aria-label="Puzzle grid" data-tour="board" className={`panel size-${size}${paused ? ' paused' : ''}`}>
         <div
           className="grid"
           role="group"
@@ -530,7 +557,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
         )}
       </section>
 
-      <section className="controls" aria-label="Number pad">
+      <section className="controls" aria-label="Number pad" data-tour="keypad">
         <div className={`keypad size-${size}`} style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
           {digitsFor(size).map((d) => (
             <button
@@ -566,7 +593,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
         <h2 id="rules-heading" className="sr-only">
           Rule cards
         </h2>
-        <div className="cards">
+        <div className="cards" data-tour="rules">
           {puzzle.rules.map((rule, i) => (
             <button
               key={rule.id}
@@ -590,6 +617,7 @@ function Game({ puzzle, focusOnMount, onDirty, onSolved, winActions }: GameProps
       <button
         type="button"
         className="check"
+        data-tour="check"
         disabled={paused}
         onClick={() => {
           const r = checkSubmission(puzzle, grid, suspect);

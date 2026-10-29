@@ -17,6 +17,8 @@
   --box-gap: 6px; /* thick divider between boxes */
   --box-line: var(--bg-deep); /* colour of the box dividers */
   --key-radius: 8px; /* number pad and tab corners */
+  --coach-dim: 0.66; /* walkthrough: how dark the dimmed page is (0-1) */
+  --coach-blur: 3px; /* walkthrough: how blurred the dimmed page is */
   color-scheme: dark;
 }
 
@@ -576,10 +578,6 @@ h1 {
   outline: 3px solid var(--tangerine);
 }
 
-.suggest .key.wide.skip {
-  width: 100%;
-  color: var(--cream);
-}
 
 .confirm-title,
 .exhausted-title {
@@ -615,7 +613,145 @@ h1 {
   color: var(--muted);
 }
 
+/* Tutorial tab: replay link for the walkthrough */
+.tour-replay {
+  align-self: center;
+  min-height: 36px;
+  border: 0;
+  background: none;
+  color: var(--cream);
+  font-size: 15px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* Guided walkthrough: dim + blur everything but the explained element */
+.coach {
+  animation: coach-in 220ms ease;
+}
+
+.coach-blocker {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.coach-shade {
+  position: fixed;
+  z-index: 51;
+  background: rgb(8 43 45 / var(--coach-dim)); /* --bg-deep */
+  -webkit-backdrop-filter: blur(var(--coach-blur));
+  backdrop-filter: blur(var(--coach-blur));
+  transition: top 280ms ease, left 280ms ease, width 280ms ease, height 280ms ease;
+  pointer-events: none;
+}
+
+.coach-ring {
+  position: fixed;
+  z-index: 52;
+  border-radius: 14px;
+  box-shadow: 0 0 0 3px var(--yellow);
+  pointer-events: none;
+  transition: top 280ms ease, left 280ms ease, width 280ms ease, height 280ms ease;
+}
+
+.coach-tip {
+  position: fixed;
+  z-index: 53;
+  width: min(360px, calc(100vw - 24px));
+  padding: 14px 16px 12px;
+  border-radius: 14px;
+  background: var(--cream);
+  color: var(--ink);
+  box-shadow: 0 6px 0 var(--bg-deep);
+  transition: top 280ms ease, left 280ms ease;
+}
+
+.coach-arrow {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  background: var(--cream);
+  transform: rotate(45deg);
+}
+
+.coach-tip.arrow-up .coach-arrow {
+  top: -7px;
+}
+
+.coach-tip.arrow-down .coach-arrow {
+  bottom: -7px;
+}
+
+.coach-count {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tangerine);
+}
+
+.coach-text {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+  animation: coach-in 220ms ease;
+}
+
+.coach-text strong {
+  font-weight: 900;
+}
+
+.coach-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.coach-skip {
+  min-height: 44px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.coach-next {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--key-radius);
+  background: var(--ink);
+  color: var(--cream);
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.coach-tip :focus-visible {
+  outline-color: var(--tangerine);
+}
+
+@keyframes coach-in {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .coach,
+  .coach-text {
+    animation: none;
+  }
+
   * {
     transition: none !important;
   }
