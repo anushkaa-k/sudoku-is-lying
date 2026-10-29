@@ -8,11 +8,9 @@
   --yellow: #ffd23f;
   --tangerine: #ff7a1a;
   --ink: #0e3b3d;
-  /* --cream as RGB channels, so fixed tiles can use the same beige at partial opacity. */
-  --cream-rgb: 255 244 224;
 
   /* Board tuning knobs */
-  --tile-bg-opacity: 0.7; /* fixed-tile beige: 1 = solid, 0 = clear */
+  --given-border-width: 1.5px; /* beige outline on fixed tiles */
   --tile-radius: 8px;
   --cell-gap: 3px; /* thin line between cells */
   --box-gap: 6px; /* thick divider between boxes */
@@ -191,10 +189,11 @@ h1 {
   padding: 0;
 }
 
-/* Same beige as before, translucent so the board shows through; the digit stays solid. */
+/* Fixed tiles: no fill, a thin border in the same beige, and a solid beige digit. */
 .tile.given {
-  background: rgb(var(--cream-rgb) / var(--tile-bg-opacity));
-  color: var(--ink);
+  background: transparent;
+  border: var(--given-border-width) solid var(--cream);
+  color: var(--cream);
 }
 
 .tile.selected {
